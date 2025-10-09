@@ -2,7 +2,7 @@
 
 # Data Ingestion: Adzuna-like job postings → GCS
 
-These contains Mishil's deliverables: code to extract job postings from an external API, write raw JSON and processed Parquet (partitioned by `ingest_date`) to Google Cloud Storage (GCS). This is scoped to ingestion only
+These contain Mishil's deliverables: code to extract job postings from an external API, write raw JSON and processed Parquet (partitioned by `ingest_date`) to Google Cloud Storage (GCS). This is scoped to ingestion only
 
 ## Files
 - `ingest.py` — main ingestion logic
