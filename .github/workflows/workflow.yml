@@ -1,12 +1,12 @@
-name: Run Adzuna Ingestion
+name: Run Adzuna Data Pipeline
 
 on:
   schedule:
     - cron: "0 3 * * *"   # Runs daily at 3 AM UTC
-  workflow_dispatch:      # Allow manual runs
+  workflow_dispatch:      # Allow manual trigger from GitHub
 
 jobs:
-  ingest:
+  data_pipeline:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,12 +28,19 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set env vars
+      - name: Set environment variables
         run: |
           echo "ADZUNA_APP_ID=${{ secrets.ADZUNA_APP_ID }}" >> $GITHUB_ENV
           echo "ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}" >> $GITHUB_ENV
           echo "BUCKET_NAME=${{ secrets.BUCKET_NAME }}" >> $GITHUB_ENV
           echo "GCP_PROJECT=${{ secrets.GCP_PROJECT }}" >> $GITHUB_ENV
 
-      - name: Run ingestion
+      - name: Run ingestion script
         run: python ingest.py --pages 2 --per_page 50
+
+      - name: Run DAG orchestration (if needed)
+        run: python dag_ingest.py
+        continue-on-error: true  # Optional if dag_ingest.py is not always required
+
+      - name: Run ingestion tests
+        run: python -m pytest test_ingest.py -v
