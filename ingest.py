@@ -44,7 +44,7 @@ def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
         raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
 
-    base_url = f"http://api.adzuna.com/v1/api/jobs/{ADZUNA_COUNTRY}/search/{page}"
+    base_url = f"https://api.adzuna.com/v1/api/jobs/us/search"
     params = {
         "app_id": ADZUNA_APP_ID,
         "app_key": ADZUNA_APP_KEY,
