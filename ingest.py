@@ -39,7 +39,7 @@ def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
     """
     Fetch one page from the Adzuna Jobs API (USA).
     Example:
-    http://api.adzuna.com/v1/api/jobs/us/search/1?app_id=XXX&app_key=YYY&results_per_page=20&what=data%20analyst
+    http://api.adzuna.com/v1/api/jobs/us/search/1?app_id=XXX&app_key=YYY&results_per_page=20&what=data
     """
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
         raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
