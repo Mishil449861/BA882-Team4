@@ -28,7 +28,7 @@ ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
 ADZUNA_QUERY = os.getenv("ADZUNA_QUERY", "data analyst")
 
 GCP_PROJECT = os.getenv("GCP_PROJECT", "my-gcp-project")
-BUCKET_NAME = os.getenv("BUCKET_NAME", "my-adzuna-bucket")
+BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
 
 RAW_PREFIX = "raw"
 PROCESSED_PREFIX = "processed"
