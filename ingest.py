@@ -1,5 +1,5 @@
 # ingest.py
-# Purpose: fetch jobs from API, write raw JSON to GCS, transform to Parquet, dedupe, upload processed.
+# Purpose: fetch jobs from Adzuna API (USA), write raw JSON to GCS, transform to Parquet, dedupe, upload processed.
 
 import os
 import json
@@ -18,42 +18,54 @@ from gcs_utils import upload_file, download_blob_to_file, blob_exists
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ingest")
 
-# Config: prefer env vars (set from Secret Manager in cloud), placeholders for local dev
-API_URL = os.getenv("API_URL", "https://api.example.com/jobs")  # replace with real endpoint
-API_KEY = os.getenv("API_KEY")  # set locally or via Secret Manager
+# --- Config ---
+ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
+ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
+
+# 👇 Country set to USA
+ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
+# 👇 You can change the search query if needed
+ADZUNA_QUERY = os.getenv("ADZUNA_QUERY", "data analyst")
+
 GCP_PROJECT = os.getenv("GCP_PROJECT", "my-gcp-project")
 BUCKET_NAME = os.getenv("BUCKET_NAME", "my-adzuna-bucket")
 
 RAW_PREFIX = "raw"
 PROCESSED_PREFIX = "processed"
 
+# --- API Fetch ---
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
-    """Fetch one page from the jobs API. Adjust headers/params to your API."""
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-    params = {"page": page, "per_page": per_page}
-    resp = requests.get(API_URL, headers=headers, params=params, timeout=30)
+    """
+    Fetch one page from the Adzuna Jobs API (USA).
+    Example:
+    http://api.adzuna.com/v1/api/jobs/us/search/1?app_id=XXX&app_key=YYY&results_per_page=20&what=data%20analyst
+    """
+    if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
+        raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
+
+    base_url = f"http://api.adzuna.com/v1/api/jobs/{ADZUNA_COUNTRY}/search/{page}"
+    params = {
+        "app_id": ADZUNA_APP_ID,
+        "app_key": ADZUNA_APP_KEY,
+        "results_per_page": per_page,
+        "what": ADZUNA_QUERY,
+        "content-type": "application/json"
+    }
+
+    resp = requests.get(base_url, params=params, timeout=30)
     resp.raise_for_status()
     payload = resp.json()
-    # API may return results under different keys. Adapt here as needed.
-    if isinstance(payload, dict) and "results" in payload:
-        return payload["results"]
-    if isinstance(payload, list):
-        return payload
-    # fallback
-    return payload.get("data", []) if isinstance(payload, dict) else []
+    return payload.get("results", [])
 
+# --- Transform ---
 def stable_job_id(record: Dict) -> str:
-    """Use API id if present, else hash title+company+location to create stable id."""
     if record.get("id"):
         return str(record["id"])
     key_fields = "|".join(str(record.get(k, "")).strip() for k in ("title", "company", "location"))
     return hashlib.sha256(key_fields.encode("utf-8")).hexdigest()
 
 def transform(records: List[Dict]) -> pd.DataFrame:
-    """Normalize a page of raw records into a flat dataframe with required columns."""
     rows = []
     ts = datetime.now(timezone.utc).isoformat()
     for r in records:
@@ -72,30 +84,24 @@ def transform(records: List[Dict]) -> pd.DataFrame:
             "ingest_ts": ts
         })
     df = pd.DataFrame(rows)
-    # basic normalization / type casting
     df["salary_min"] = pd.to_numeric(df["salary_min"], errors="coerce")
     df["salary_max"] = pd.to_numeric(df["salary_max"], errors="coerce")
     df["ingest_date"] = pd.to_datetime(df["ingest_ts"]).dt.date.astype(str)
     return df
 
+# --- GCS Handling ---
 def read_existing_processed(bucket: str, ingest_date: str) -> Optional[pd.DataFrame]:
-    """If processed parquet exists for the date, download and read it for dedupe/merge."""
     blob = f"{PROCESSED_PREFIX}/{ingest_date}/jobs.parquet"
     if not blob_exists(bucket, blob):
         return None
     tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
     try:
         download_blob_to_file(bucket, blob, tmp.name)
-        df = pd.read_parquet(tmp.name)
-        return df
+        return pd.read_parquet(tmp.name)
     finally:
-        try:
-            tmp.close()
-        except Exception:
-            pass
+        tmp.close()
 
 def write_processed_and_upload(df: pd.DataFrame, bucket: str, ingest_date: str):
-    """Merge with existing processed, dedupe, write to local temp parquet, then upload to GCS."""
     existing = read_existing_processed(bucket, ingest_date)
     if existing is not None and not existing.empty:
         combined = pd.concat([existing, df], ignore_index=True)
@@ -109,7 +115,6 @@ def write_processed_and_upload(df: pd.DataFrame, bucket: str, ingest_date: str):
     logger.info("Uploaded processed parquet with %d rows", len(combined))
 
 def write_raw_json(records: List[Dict], bucket: str, ingest_date: str, page_idx: int):
-    """Write raw JSON page to GCS for audit and reprocessing."""
     tmp = tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False)
     json.dump(records, tmp)
     tmp.flush()
@@ -118,8 +123,8 @@ def write_raw_json(records: List[Dict], bucket: str, ingest_date: str, page_idx:
     upload_file(bucket, dest_blob, tmp.name, content_type="application/json")
     logger.info("Uploaded raw page %s", dest_blob)
 
-def run_ingestion(max_pages: int = 5, per_page: int = 50):
-    """Main ingestion loop: fetch pages, write raw, transform & upload deduped parquet by ingest_date."""
+# --- Runner ---
+def run_ingestion(max_pages: int = 2, per_page: int = 20):
     for page in range(1, max_pages + 1):
         logger.info("Fetching page %d", page)
         records = fetch_page(page=page, per_page=per_page)
@@ -134,8 +139,8 @@ def run_ingestion(max_pages: int = 5, per_page: int = 50):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Run ingestion locally")
+    parser = argparse.ArgumentParser(description="Run Adzuna USA ingestion locally")
     parser.add_argument("--pages", type=int, default=2, help="Max pages to fetch")
-    parser.add_argument("--per_page", type=int, default=50)
+    parser.add_argument("--per_page", type=int, default=20)
     args = parser.parse_args()
     run_ingestion(max_pages=args.pages, per_page=args.per_page)
