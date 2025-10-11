@@ -25,16 +25,16 @@ ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
 # 👇 Country set to USA
 ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
 # 👇 You can change the search query if needed
-ADZUNA_QUERY = os.getenv("ADZUNA_QUERY", "data analyst")
+ADZUNA_QUERY = os.getenv("ADZUNA_QUERY", "data")
 
-GCP_PROJECT = os.getenv("GCP_PROJECT", "my-gcp-project")
+GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
 BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
 
 RAW_PREFIX = "raw"
 PROCESSED_PREFIX = "processed"
 
 # --- API Fetch ---
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=100))
 def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
     """
     Fetch one page from the Adzuna Jobs API (USA).
