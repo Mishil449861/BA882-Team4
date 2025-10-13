@@ -1,6 +1,5 @@
 name: Run Adzuna Data Pipeline
 
-
 on:
   schedule:
     - cron: "0 3 * * *"   # Runs daily at 3 AM UTC
@@ -24,8 +23,6 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install apache-airflow==2.9.1
-          pip install --upgrade pip
-          pip install -r requirements.txt
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -40,11 +37,17 @@ jobs:
           echo "GCP_PROJECT=${{ secrets.GCP_PROJECT }}" >> $GITHUB_ENV
 
       - name: Run ingestion script
-        run: python ingest.py --pages 2 --per_page 50
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          python ingest.py --pages 2 --per_page 50
 
       - name: Run DAG orchestration (if needed)
-        run: python dag_ingest.py
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          python dag_ingest.py
         continue-on-error: true  # Optional if dag_ingest.py is not always required
 
       - name: Run ingestion tests
-        run: python -m pytest test_ingest.py -v
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+          python -m pytest test_ingest.py -v
