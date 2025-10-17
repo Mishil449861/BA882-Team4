@@ -172,4 +172,17 @@ def run_ingestion(per_page: int = 50):
     logger.info("Ingestion completed.")
 
 if __name__ == "__main__":
-    run_ingestion(per_page=50)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Ingest job data from Adzuna and upload to GCS")
+    parser.add_argument("--pages", type=int, default=2, help="Number of pages to fetch from Adzuna")
+    parser.add_argument("--per_page", type=int, default=50, help="Number of records per page")
+    args = parser.parse_args()
+    
+     print(f"🚀 Starting ingestion: pages={args.pages}, per_page={args.per_page}")
+    try:
+        run_ingestion(pages=args.pages, per_page=args.per_page)
+        print("✅ Ingestion completed successfully.")
+    except Exception as e:
+        print(f"❌ Ingestion failed: {e}")
+        raise
