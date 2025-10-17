@@ -28,7 +28,7 @@ ADZUNA_COUNTRY = "us"
 # Multi-role search query to capture all data-related jobs
 ADZUNA_QUERY = os.getenv(
     "ADZUNA_QUERY",
-    "data analyst OR data scientist OR machine learning engineer OR data engineer OR AI engineer"
+    "data analyst OR data scientist OR machine learning engineer OR data engineer OR AI engineer OR data science OR data analysis OR "
 )
 
 GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
