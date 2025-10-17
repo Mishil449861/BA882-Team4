@@ -29,12 +29,7 @@ ADZUNA_COUNTRY = "us"
 ADZUNA_QUERY = os.getenv(
     "ADZUNA_QUERY",
     "data analyst OR business analyst OR product analyst OR marketing analyst OR operations analyst OR financial analyst OR risk analyst OR investment analyst 
-    OR policy analyst OR strategy analyst OR research analyst OR quantitative analyst OR revenue analyst OR reporting analyst OR decision analyst 
-    OR pricing analyst OR growth analyst OR data scientist OR applied scientist OR research scientist OR data science OR data engineer 
-    OR machine learning engineer OR AI engineer OR analytics engineer OR business intelligence engineer OR BI engineer OR data strategist OR data specialist 
-    OR data consultant OR data associate OR insights analyst OR insights manager OR business intelligence analyst OR BI analyst OR predictive modeler 
-    OR statistical analyst OR forecasting analyst OR econometrician OR experiment analyst OR A/B testing analyst OR optimization analyst 
-    OR customer insights analyst OR data visualization specialist OR reporting specialist OR quantitative researcher OR data research associate"
+    OR policy analyst"
 )
 
 GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
