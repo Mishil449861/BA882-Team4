@@ -40,7 +40,6 @@ def task_run_ingest(**kwargs):
         run_ingestion(
             max_pages=3,
             per_page=50,
-            bucket_name=bucket_name  # ensure your ingest.py accepts this arg
         )
         logger.info("Ingestion completed successfully.")
     except Exception as e:
