@@ -1,9 +1,15 @@
 # dag_ingest.py
-# Purpose: minimal Airflow DAG stub to call the ingestion function daily.
+# Purpose: Airflow DAG to run Adzuna ingestion daily and push to GCS
+
+import os
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+import logging
 
+logger = logging.getLogger(__name__)
+
+# Default args for DAG
 default_args = {
     "owner": "dataeng",
     "depends_on_past": False,
@@ -12,24 +18,51 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
+# Python callable that actually runs ingestion
 def task_run_ingest(**kwargs):
-    # Import inside task so Airflow environment loads modules when task runs
+    """
+    This task runs the Adzuna ingestion pipeline and uploads processed data to GCS.
+    """
     from ingest import run_ingestion
-    run_ingestion(max_pages=3, per_page=50)
 
+    # Load bucket name and GCP project from Airflow environment
+    bucket_name = os.environ.get("BUCKET_NAME")
+    if not bucket_name:
+        raise ValueError("Missing BUCKET_NAME in environment — cannot upload to GCS.")
+
+    # Optional: GCP_PROJECT if needed downstream
+    gcp_project = os.environ.get("GCP_PROJECT", "unknown")
+
+    logger.info(f"Starting ingestion for project={gcp_project}, bucket={bucket_name}")
+
+    try:
+        # Run the actual ingestion logic
+        run_ingestion(
+            max_pages=3,
+            per_page=50,
+            bucket_name=bucket_name  # ensure your ingest.py accepts this arg
+        )
+        logger.info("Ingestion completed successfully.")
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}", exc_info=True)
+        raise  # Let Airflow mark this task as failed
+
+# Define DAG
 with DAG(
-    dag_id="person1_ingest_stub",
+    dag_id="adzuna_ingestion_daily",
     default_args=default_args,
-    description="Stub DAG for Person1 ingestion; Person2 will deploy/schedule in Astronomer",
+    description="Daily Adzuna job postings ingestion -> GCS",
     schedule_interval="@daily",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
+    tags=["adzuna", "gcs", "ingestion"],
 ) as dag:
-    run_task = PythonOperator(
-        task_id="run_person1_ingest",
+
+    run_ingestion_task = PythonOperator(
+        task_id="run_ingestion",
         python_callable=task_run_ingest,
-        provide_context=True
+        provide_context=True,
     )
 
-    run_task
+    run_ingestion_task
