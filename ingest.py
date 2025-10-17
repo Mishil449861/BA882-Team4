@@ -178,11 +178,12 @@ if __name__ == "__main__":
     parser.add_argument("--pages", type=int, default=2, help="Number of pages to fetch from Adzuna")
     parser.add_argument("--per_page", type=int, default=50, help="Number of records per page")
     args = parser.parse_args()
-    
-     print(f"🚀 Starting ingestion: pages={args.pages}, per_page={args.per_page}")
+
+    print(f"Starting ingestion: pages={args.pages}, per_page={args.per_page}")
     try:
         run_ingestion(pages=args.pages, per_page=args.per_page)
-        print("✅ Ingestion completed successfully.")
+        print("Ingestion completed successfully.")
     except Exception as e:
-        print(f"❌ Ingestion failed: {e}")
+        print(f"Ingestion failed: {e}")
         raise
+
