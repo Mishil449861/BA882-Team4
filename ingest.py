@@ -21,11 +21,9 @@ logger = logging.getLogger("ingest")
 # --- Config ---
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
-
-# Fetch jobs from the USA site
 ADZUNA_COUNTRY = "us"
 
-# Multi-role search query to capture all data-related jobs
+# Expanded multi-role search query for analytics, data & AI jobs
 ADZUNA_QUERY = os.getenv(
     "ADZUNA_QUERY",
     (
@@ -40,22 +38,21 @@ ADZUNA_QUERY = os.getenv(
         "econometrician OR forecasting analyst OR revenue analyst OR supply chain analyst OR business analyst OR "
         "quantitative researcher OR AI researcher OR ML researcher OR applied scientist OR research scientist OR "
         "ML ops engineer OR data ops engineer OR analytics consultant OR business data analyst OR "
-        "insights manager OR head of analytics OR director of data OR analytics lead OR data lead"
+        "insights manager OR head of analytics OR director of data OR analytics lead OR data lead OR "
+        "business systems analyst OR reporting specialist OR business insights analyst OR people analytics analyst OR "
+        "pricing analyst OR actuarial analyst OR workforce analyst OR policy analyst OR performance analyst OR "
+        "competitive intelligence analyst OR strategy analyst"
     )
 )
 
-
 GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
 BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
-
 PROCESSED_PREFIX = "processed"
 
 # --- API Fetch ---
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
-    """
-    Fetch one page of Adzuna USA job listings.
-    """
+    """Fetch one page of Adzuna USA job listings."""
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
         raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
 
@@ -65,7 +62,7 @@ def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
         "app_key": ADZUNA_APP_KEY,
         "results_per_page": per_page,
         "what": ADZUNA_QUERY,
-        "content-type": "application/json"
+        "content-type": "application/json",
     }
 
     resp = requests.get(base_url, params=params, timeout=30)
@@ -88,13 +85,11 @@ def transform(records: List[Dict]) -> pd.DataFrame:
 
     for r in records:
         jid = stable_job_id(r)
-
         company = r.get("company") or {}
         location = r.get("location") or {}
         category = r.get("category") or {}
 
         rows.append({
-            # Jobs Table
             "job_id": jid,
             "title": r.get("title"),
             "description": r.get("description"),
@@ -102,24 +97,14 @@ def transform(records: List[Dict]) -> pd.DataFrame:
             "salary_max": r.get("salary_max"),
             "created": r.get("created"),
             "redirect_url": r.get("redirect_url"),
-
-            # Companies Table
             "company_name": company.get("display_name"),
-
-            # Locations Table
             "city": location.get("area")[1] if isinstance(location.get("area"), list) and len(location.get("area")) > 1 else None,
             "state": location.get("area")[0] if isinstance(location.get("area"), list) else None,
             "country": location.get("display_name"),
-
-            # Categories Table
             "category_label": category.get("label"),
-
-            # JobStats Table
             "contract_type": r.get("contract_type"),
             "contract_time": r.get("contract_time"),
             "posting_week": pd.to_datetime(r.get("created")).isocalendar().week if r.get("created") else None,
-
-            # Metadata
             "ingest_ts": ts
         })
 
@@ -156,33 +141,34 @@ def write_processed_and_upload(df: pd.DataFrame, bucket: str, ingest_date: str):
     logger.info("Uploaded processed parquet with %d rows", len(combined))
 
 # --- Runner ---
-def run_ingestion(per_page: int = 50):
-    page = 1
-    while True:
-        logger.info("Fetching page %d", page)
+def run_ingestion(max_pages: int = 2, per_page: int = 50, bucket_name: Optional[str] = None):
+    """Main ingestion runner with paging."""
+    bucket = bucket_name or BUCKET_NAME
+
+    for page in range(1, max_pages + 1):
+        logger.info("Fetching page %d of %d", page, max_pages)
         records = fetch_page(page=page, per_page=per_page)
         if not records:
             logger.info("No more records; stopping at page %d", page)
             break
         ingest_date = datetime.now(timezone.utc).date().isoformat()
         df = transform(records)
-        write_processed_and_upload(df, BUCKET_NAME, ingest_date)
-        page += 1
+        write_processed_and_upload(df, bucket, ingest_date)
 
     logger.info("Ingestion completed.")
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="Ingest job data from Adzuna and upload to GCS")
     parser.add_argument("--pages", type=int, default=2, help="Number of pages to fetch from Adzuna")
     parser.add_argument("--per_page", type=int, default=50, help="Number of records per page")
+    parser.add_argument("--bucket_name", type=str, default=None, help="Override GCS bucket name")
     args = parser.parse_args()
 
-    print(f"Starting ingestion: pages={args.pages}, per_page={args.per_page}")
+    logger.info(f"Starting ingestion: pages={args.pages}, per_page={args.per_page}, bucket={args.bucket_name or BUCKET_NAME}")
     try:
-        run_ingestion(pages=args.pages, per_page=args.per_page)
-        print("Ingestion completed successfully.")
+        run_ingestion(max_pages=args.pages, per_page=args.per_page, bucket_name=args.bucket_name)
+        logger.info("Ingestion completed successfully.")
     except Exception as e:
-        print(f"Ingestion failed: {e}")
+        logger.error(f"Ingestion failed: {e}", exc_info=True)
         raise
