@@ -45,8 +45,10 @@ ADZUNA_QUERY = os.getenv(
     )
 )
 
-GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
-BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
+GCP_PROJECT = os.getenv("GCP_PROJECT", "GCP_PROJECT")
+BUCKET_NAME = os.getenv("BUCKET_NAME", "BUCKET_NAME")
+GCP_SA_KEY = os.getenv("GCP_SA_KEY")  # This should contain the JSON key content
+
 PROCESSED_PREFIX = "processed"
 
 # --- API Fetch ---
