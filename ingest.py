@@ -1,5 +1,5 @@
 # ingest.py
-# Purpose: Fetch Adzuna USA data jobs, transform into relational structure, deduplicate, upload processed Parquet to GCS.
+# Purpose: Fetch jobs from Adzuna API (USA), transform to relational Parquet, dedupe, upload to GCS (processed only)
 
 import os
 import json
@@ -21,9 +21,9 @@ logger = logging.getLogger("ingest")
 # --- Config ---
 ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
 ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
-ADZUNA_COUNTRY = "us"
+ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
 
-# Expanded multi-role search query for analytics, data & AI jobs
+# ✅ New expanded multi-role query
 ADZUNA_QUERY = os.getenv(
     "ADZUNA_QUERY",
     (
@@ -45,16 +45,15 @@ ADZUNA_QUERY = os.getenv(
     )
 )
 
-GCP_PROJECT = os.getenv("GCP_PROJECT", "GCP_PROJECT")
-BUCKET_NAME = os.getenv("BUCKET_NAME", "BUCKET_NAME")
-GCP_SA_KEY = os.getenv("GCP_SA_KEY")  # This should contain the JSON key content
+GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
+BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
 
 PROCESSED_PREFIX = "processed"
 
 # --- API Fetch ---
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=100))
 def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
-    """Fetch one page of Adzuna USA job listings."""
+    """Fetch one page from the Adzuna Jobs API (USA)."""
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
         raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
 
@@ -64,7 +63,7 @@ def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
         "app_key": ADZUNA_APP_KEY,
         "results_per_page": per_page,
         "what": ADZUNA_QUERY,
-        "content-type": "application/json",
+        "content-type": "application/json"
     }
 
     resp = requests.get(base_url, params=params, timeout=30)
@@ -74,7 +73,6 @@ def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
 
 # --- Transform ---
 def stable_job_id(record: Dict) -> str:
-    """Create stable hash ID for deduplication."""
     if record.get("id"):
         return str(record["id"])
     key_fields = "|".join(str(record.get(k, "")).strip() for k in ("title", "company", "location"))
@@ -140,37 +138,27 @@ def write_processed_and_upload(df: pd.DataFrame, bucket: str, ingest_date: str):
     combined.to_parquet(tmp.name, index=False)
     dest_blob = f"{PROCESSED_PREFIX}/{ingest_date}/jobs.parquet"
     upload_file(bucket, dest_blob, tmp.name, content_type="application/octet-stream")
-    logger.info("Uploaded processed parquet with %d rows", len(combined))
+    logger.info("Uploaded processed parquet with %d rows to %s", len(combined), dest_blob)
 
 # --- Runner ---
-def run_ingestion(max_pages: int = 2, per_page: int = 50, bucket_name: Optional[str] = None):
-    """Main ingestion runner with paging."""
-    bucket = bucket_name or BUCKET_NAME
-
+def run_ingestion(max_pages: int = 2, per_page: int = 20):
     for page in range(1, max_pages + 1):
-        logger.info("Fetching page %d of %d", page, max_pages)
+        logger.info("Fetching page %d", page)
         records = fetch_page(page=page, per_page=per_page)
         if not records:
-            logger.info("No more records; stopping at page %d", page)
+            logger.info("No records on page %d; stopping", page)
             break
+
         ingest_date = datetime.now(timezone.utc).date().isoformat()
         df = transform(records)
-        write_processed_and_upload(df, bucket, ingest_date)
+        write_processed_and_upload(df, BUCKET_NAME, ingest_date)
 
     logger.info("Ingestion completed.")
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Ingest job data from Adzuna and upload to GCS")
-    parser.add_argument("--pages", type=int, default=2, help="Number of pages to fetch from Adzuna")
-    parser.add_argument("--per_page", type=int, default=50, help="Number of records per page")
-    parser.add_argument("--bucket_name", type=str, default=None, help="Override GCS bucket name")
+    parser = argparse.ArgumentParser(description="Run Adzuna USA ingestion")
+    parser.add_argument("--pages", type=int, default=2, help="Max pages to fetch")
+    parser.add_argument("--per_page", type=int, default=20)
     args = parser.parse_args()
-
-    logger.info(f"Starting ingestion: pages={args.pages}, per_page={args.per_page}, bucket={args.bucket_name or BUCKET_NAME}")
-    try:
-        run_ingestion(max_pages=args.pages, per_page=args.per_page, bucket_name=args.bucket_name)
-        logger.info("Ingestion completed successfully.")
-    except Exception as e:
-        logger.error(f"Ingestion failed: {e}", exc_info=True)
-        raise
+    run_ingestion(max_pages=args.pages, per_page=args.per_page)
