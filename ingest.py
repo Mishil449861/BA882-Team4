@@ -27,21 +27,7 @@ ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
 ADZUNA_QUERY = os.getenv(
     "ADZUNA_QUERY",
     (
-        "data analyst OR data scientist OR data engineer OR machine learning engineer OR AI engineer OR "
-        "data science OR data analysis OR analytics engineer OR business intelligence OR BI analyst OR "
-        "quantitative analyst OR statistician OR research analyst OR marketing analyst OR financial analyst OR "
-        "reporting analyst OR insights analyst OR operations analyst OR risk analyst OR fraud analyst OR "
-        "product analyst OR customer insights OR growth analyst OR data visualization OR data governance OR "
-        "data architect OR ML engineer OR deep learning engineer OR NLP engineer OR computer vision engineer OR "
-        "ETL developer OR data warehouse engineer OR BI developer OR Tableau developer OR Power BI developer OR "
-        "data quality analyst OR data steward OR data strategist OR data consultant OR decision scientist OR "
-        "econometrician OR forecasting analyst OR revenue analyst OR supply chain analyst OR business analyst OR "
-        "quantitative researcher OR AI researcher OR ML researcher OR applied scientist OR research scientist OR "
-        "ML ops engineer OR data ops engineer OR analytics consultant OR business data analyst OR "
-        "insights manager OR head of analytics OR director of data OR analytics lead OR data lead OR "
-        "business systems analyst OR reporting specialist OR business insights analyst OR people analytics analyst OR "
-        "pricing analyst OR actuarial analyst OR workforce analyst OR policy analyst OR performance analyst OR "
-        "competitive intelligence analyst OR strategy analyst"
+        "data"
     )
 )
 
