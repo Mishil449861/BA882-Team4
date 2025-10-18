@@ -30,21 +30,20 @@ def task_run_ingest(**kwargs):
     if not bucket_name:
         raise ValueError("Missing BUCKET_NAME in environment — cannot upload to GCS.")
 
-    # Optional: GCP_PROJECT if needed downstream
     gcp_project = os.environ.get("GCP_PROJECT", "unknown")
-
     logger.info(f"Starting ingestion for project={gcp_project}, bucket={bucket_name}")
 
     try:
-        # Run the actual ingestion logic
+        # ✅ Pass the bucket name to ingestion
         run_ingestion(
             max_pages=3,
             per_page=50,
+            bucket_name=bucket_name,
         )
         logger.info("Ingestion completed successfully.")
     except Exception as e:
         logger.error(f"Ingestion failed: {e}", exc_info=True)
-        raise  # Let Airflow mark this task as failed
+        raise
 
 # Define DAG
 with DAG(
