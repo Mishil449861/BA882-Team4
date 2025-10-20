@@ -1,150 +1,139 @@
 # ingest.py
-# Purpose: Fetch jobs from Adzuna API (USA), transform to relational Parquet, dedupe, upload to GCS (processed only)
 
 import os
-import json
-import hashlib
-import tempfile
-import logging
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
-
-import pandas as pd
 import requests
+import pandas as pd
+from datetime import datetime, timezone
+from google.cloud import storage
 from tenacity import retry, stop_after_attempt, wait_exponential
+import argparse
 
-from gcs_utils import upload_file, download_blob_to_file, blob_exists
+# --------------- CONFIG ---------------
+ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID")
+ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
+GCS_BUCKET = os.environ.get("BUCKET_NAME")
+GCS_PREFIX = "adzuna_ingest"
+COUNTRY = "us"
+# --------------------------------------
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ingest")
-
-# --- Config ---
-ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
-ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
-ADZUNA_COUNTRY = os.getenv("ADZUNA_COUNTRY", "us")
-
-# ✅ New expanded multi-role query
-ADZUNA_QUERY = os.getenv(
-    "ADZUNA_QUERY",
-    (
-        "data"
-    )
-)
-
-GCP_PROJECT = os.getenv("GCP_PROJECT", "ba882-team4-474802")
-BUCKET_NAME = os.getenv("BUCKET_NAME", "adzuna-bucket")
-
-PROCESSED_PREFIX = "processed"
-
-# --- API Fetch ---
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=100))
-def fetch_page(page: int = 1, per_page: int = 50) -> List[Dict]:
-    """Fetch one page from the Adzuna Jobs API (USA)."""
-    if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
-        raise RuntimeError("ADZUNA_APP_ID and ADZUNA_APP_KEY must be set as environment variables")
-
-    base_url = f"https://api.adzuna.com/v1/api/jobs/{ADZUNA_COUNTRY}/search/{page}"
+@retry(stop=stop_after_attempt(3), wait=wait_exponential())
+def fetch_jobs(page=1, per_page=50):
+    url = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/{page}"
     params = {
         "app_id": ADZUNA_APP_ID,
         "app_key": ADZUNA_APP_KEY,
         "results_per_page": per_page,
-        "what": ADZUNA_QUERY,
-        "content-type": "application/json"
+        "content-type": "application/json",
     }
-
-    resp = requests.get(base_url, params=params, timeout=30)
+    resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
-    payload = resp.json()
-    return payload.get("results", [])
+    return resp.json().get("results", [])
 
-# --- Transform ---
-def stable_job_id(record: Dict) -> str:
-    if record.get("id"):
-        return str(record["id"])
-    key_fields = "|".join(str(record.get(k, "")).strip() for k in ("title", "company", "location"))
-    return hashlib.sha256(key_fields.encode("utf-8")).hexdigest()
-
-def transform(records: List[Dict]) -> pd.DataFrame:
-    """Transform Adzuna API JSON into relational tabular structure."""
-    rows = []
-    ts = datetime.now(timezone.utc).isoformat()
+def transform(records):
+    jobs_data, companies_data, locations_data, categories_data, jobstats_data = [], [], [], [], []
+    now_ts = datetime.now(timezone.utc).isoformat()
 
     for r in records:
-        jid = stable_job_id(r)
-        company = r.get("company") or {}
-        location = r.get("location") or {}
-        category = r.get("category") or {}
+        job_id = str(r.get("id"))
+        title = r.get("title")
+        description = r.get("description")
+        created = r.get("created")
+        salary_min = r.get("salary_min")
+        salary_max = r.get("salary_max")
+        redirect_url = r.get("redirect_url")
 
-        rows.append({
-            "job_id": jid,
-            "title": r.get("title"),
-            "description": r.get("description"),
-            "salary_min": r.get("salary_min"),
-            "salary_max": r.get("salary_max"),
-            "created": r.get("created"),
-            "redirect_url": r.get("redirect_url"),
-            "company_name": company.get("display_name"),
-            "city": location.get("area")[1] if isinstance(location.get("area"), list) and len(location.get("area")) > 1 else None,
-            "state": location.get("area")[0] if isinstance(location.get("area"), list) else None,
-            "country": location.get("display_name"),
-            "category_label": category.get("label"),
-            "contract_type": r.get("contract_type"),
-            "contract_time": r.get("contract_time"),
-            "posting_week": pd.to_datetime(r.get("created")).isocalendar().week if r.get("created") else None,
-            "ingest_ts": ts
+        # ------------------- JOBS -------------------
+        jobs_data.append({
+            "job_id": job_id,
+            "title": title,
+            "description": description,
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+            "created": created,
+            "redirect_url": redirect_url,
+            "ingest_ts": now_ts
         })
 
-    df = pd.DataFrame(rows)
-    df["salary_min"] = pd.to_numeric(df["salary_min"], errors="coerce")
-    df["salary_max"] = pd.to_numeric(df["salary_max"], errors="coerce")
-    df["ingest_date"] = pd.to_datetime(df["ingest_ts"]).dt.date.astype(str)
-    return df
+        # ------------------- COMPANIES -------------------
+        company_name = r.get("company", {}).get("display_name")
+        companies_data.append({
+            "job_id": job_id,
+            "company_name": company_name
+        })
 
-# --- GCS Handling ---
-def read_existing_processed(bucket: str, ingest_date: str) -> Optional[pd.DataFrame]:
-    blob = f"{PROCESSED_PREFIX}/{ingest_date}/jobs.parquet"
-    if not blob_exists(bucket, blob):
-        return None
-    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    try:
-        download_blob_to_file(bucket, blob, tmp.name)
-        return pd.read_parquet(tmp.name)
-    finally:
-        tmp.close()
+        # ------------------- LOCATIONS (fixed) -------------------
+        loc = r.get("location", {})
+        area = loc.get("area") or []
 
-def write_processed_and_upload(df: pd.DataFrame, bucket: str, ingest_date: str):
-    existing = read_existing_processed(bucket, ingest_date)
-    if existing is not None and not existing.empty:
-        combined = pd.concat([existing, df], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["job_id"], keep="last")
-    else:
-        combined = df.drop_duplicates(subset=["job_id"], keep="last")
+        # area looks like: ['US', 'California', 'Pleasant Hill, Contra Costa County']
+        country = "US"
+        state = None
+        city = None
+        if len(area) == 3:
+            country, state, city = area[0], area[1], area[2]
+        elif len(area) == 2:
+            country, state = area[0], area[1]
+        elif len(area) == 1:
+            country = area[0]
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    combined.to_parquet(tmp.name, index=False)
-    dest_blob = f"{PROCESSED_PREFIX}/{ingest_date}/jobs.parquet"
-    upload_file(bucket, dest_blob, tmp.name, content_type="application/octet-stream")
-    logger.info("Uploaded processed parquet with %d rows to %s", len(combined), dest_blob)
+        locations_data.append({
+            "job_id": job_id,
+            "city": city,
+            "state": state,
+            "country": country
+        })
 
-# --- Runner ---
-def run_ingestion(max_pages: int = 2, per_page: int = 20):
-    for page in range(1, max_pages + 1):
-        logger.info("Fetching page %d", page)
-        records = fetch_page(page=page, per_page=per_page)
-        if not records:
-            logger.info("No records on page %d; stopping", page)
-            break
+        # ------------------- CATEGORIES -------------------
+        category_label = r.get("category", {}).get("label")
+        categories_data.append({
+            "job_id": job_id,
+            "category_label": category_label
+        })
 
-        ingest_date = datetime.now(timezone.utc).date().isoformat()
-        df = transform(records)
-        write_processed_and_upload(df, BUCKET_NAME, ingest_date)
+        # ------------------- JOBSTATS -------------------
+        contract_type = r.get("contract_type")
+        contract_time = r.get("contract_time")
+        posting_week = pd.to_datetime(created).isocalendar().week if created else None
+        jobstats_data.append({
+            "job_id": job_id,
+            "contract_type": contract_type,
+            "contract_time": contract_time,
+            "posting_week": posting_week
+        })
 
-    logger.info("Ingestion completed.")
+    return (
+        pd.DataFrame(jobs_data),
+        pd.DataFrame(companies_data),
+        pd.DataFrame(locations_data),
+        pd.DataFrame(categories_data),
+        pd.DataFrame(jobstats_data),
+    )
+
+def upload_to_gcs(df: pd.DataFrame, prefix: str):
+    client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET)
+    file_name = f"{GCS_PREFIX}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
+    tmp_file = f"/tmp/{prefix}.parquet"
+    df.to_parquet(tmp_file, index=False)
+    blob = bucket.blob(file_name)
+    blob.upload_from_filename(tmp_file)
+    print(f"✅ Uploaded {prefix} to gs://{GCS_BUCKET}/{file_name}")
+
+def main(pages: int, per_page: int):
+    all_records = []
+    for page in range(1, pages + 1):
+        all_records.extend(fetch_jobs(page, per_page))
+    jobs_df, companies_df, locations_df, categories_df, jobstats_df = transform(all_records)
+
+    upload_to_gcs(jobs_df, "jobs")
+    upload_to_gcs(companies_df, "companies")
+    upload_to_gcs(locations_df, "locations")
+    upload_to_gcs(categories_df, "categories")
+    upload_to_gcs(jobstats_df, "jobstats")
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Run Adzuna USA ingestion")
-    parser.add_argument("--pages", type=int, default=2, help="Max pages to fetch")
-    parser.add_argument("--per_page", type=int, default=20)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pages", type=int, default=1)
+    parser.add_argument("--per_page", type=int, default=50)
     args = parser.parse_args()
-    run_ingestion(max_pages=args.pages, per_page=args.per_page)
+    main(args.pages, args.per_page)
