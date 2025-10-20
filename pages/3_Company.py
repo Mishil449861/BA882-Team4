@@ -3,14 +3,13 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import pandas as pd
 
-# GCP credentials setup
-project_id = "ba882-team4-474802"
-key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+# ✅ Load credentials from secrets (works locally and on Streamlit Cloud)
 credentials = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"]
 )
 project_id = credentials.project_id
 client = bigquery.Client(credentials=credentials, project=project_id)
+
 st.title("🏢 Company-wise Hiring Dashboard")
 
 # --- Fetch company list ---
