@@ -20,8 +20,8 @@ PROCESSED_PREFIX = "processed"
 COUNTRY = "us"
 RESULTS_PER_PAGE = 50
 MAX_PAGES = 5
-
 BASE_URL = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search"
+
 
 def fetch_data(pages=MAX_PAGES, per_page=RESULTS_PER_PAGE):
     """Fetch job listings from Adzuna API for data, analytics, and research roles."""
@@ -80,10 +80,7 @@ def transform(records):
         })
 
         # Companies
-        companies_rows.append({
-            "job_id": jid,
-            "company": company
-        })
+        companies_rows.append({"job_id": jid, "company": company})
 
         # Locations
         loc = r.get("location") or {}
@@ -107,10 +104,7 @@ def transform(records):
         })
 
         # Categories
-        categories_rows.append({
-            "job_id": jid,
-            "category": category
-        })
+        categories_rows.append({"job_id": jid, "category": category})
 
         # Job Stats
         jobstats_rows.append({
@@ -127,16 +121,20 @@ def transform(records):
     categories_df = pd.DataFrame(categories_rows)
     jobstats_df = pd.DataFrame(jobstats_rows)
 
-    # Ensure strings
-    for col in ["city", "state"]:
-        if col in locations_df.columns:
-            locations_df[col] = locations_df[col].astype(str)
+    logger.info(
+        f"DataFrame counts → Jobs: {len(jobs_df)} | Companies: {len(companies_df)} | "
+        f"Locations: {len(locations_df)} | Categories: {len(categories_df)} | JobStats: {len(jobstats_df)}"
+    )
 
     return jobs_df, companies_df, locations_df, categories_df, jobstats_df
 
 
 def upload_to_gcs(df, prefix):
-    """Upload DataFrame to GCS as Parquet."""
+    """Upload DataFrame to GCS as Parquet (skips empty DataFrames)."""
+    if df.empty:
+        logger.warning(f"⚠️ Skipping upload for {prefix}: empty DataFrame")
+        return None
+
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -149,7 +147,7 @@ def upload_to_gcs(df, prefix):
     blob = bucket.blob(path)
     blob.upload_from_filename(tmp.name)
     gs_path = f"gs://{GCS_BUCKET}/{path}"
-    logger.info("✅ Uploaded %s -> %s", prefix, gs_path)
+    logger.info("✅ Uploaded %s → %s", prefix, gs_path)
     return gs_path
 
 
