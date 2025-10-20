@@ -2,7 +2,7 @@
 # Purpose: Tests for the multi-table Adzuna data ingestion pipeline.
 
 import pandas as pd
-from ingest import transform_data
+from ingest import transform
 
 
 def sample_record(id_val="JOB123", title="Data Scientist", company="ACME Analytics", city="New York"):
