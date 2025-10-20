@@ -1,18 +1,11 @@
 import streamlit as st
-from google.cloud import bigquery
-from google.oauth2 import service_account
 import pandas as pd
 import altair as alt
+from gcp_utils import get_bq_client
 
-# GCP 인증 설정
-project_id = "ba882-team4-474802"
-key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-credentials = service_account.Credentials.from_service_account_file(key_path)
-client = bigquery.Client(credentials=credentials, project=project_id)
-
+client = get_bq_client()
 st.title("📍 Location-Based Job Insights")
 
-# 쿼리 함수 정의
 @st.cache_data
 def get_city_insights(selected_category=None):
     filter_clause = f"AND cat.category_label = '{selected_category}'" if selected_category else ""
@@ -41,12 +34,10 @@ def get_all_categories():
     """
     return client.query(query).to_dataframe()["category_label"].tolist()
 
-# 사이드바 필터
 st.sidebar.subheader("🔎 Filter by Category")
 categories = get_all_categories()
 selected_category = st.sidebar.selectbox("Choose a category (optional):", ["All"] + categories)
 
-# 데이터 호출
 df = get_city_insights(None if selected_category == "All" else selected_category)
 
 if df.empty:
@@ -67,5 +58,4 @@ else:
 
     avg_overall = int(df["avg_salary"].mean())
     col2.metric("Average Across Top Cities", f"${avg_overall:,}")
-
     col3.metric("Category Filter", selected_category if selected_category != "All" else "None")
