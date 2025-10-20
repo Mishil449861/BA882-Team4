@@ -5,10 +5,13 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 def get_bq_client():
-    key_json_str = st.secrets["GCP_SERVICE_ACCOUNT"]
-    key_info = json.loads(key_json_str)
-    credentials = service_account.Credentials.from_service_account_info(key_info)
-    return bigquery.Client(credentials=credentials, project=key_info["project_id"])
+    # Streamlit secrets returns a dict, not a JSON string
+    key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+
+    # Create credentials and BigQuery client
+    credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+    client = bigquery.Client(credentials=credentials, project=key_info["project_id"])
+    return client
 
 
 # from google.cloud import bigquery
