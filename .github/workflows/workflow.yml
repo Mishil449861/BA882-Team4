@@ -42,53 +42,24 @@ jobs:
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
           python ingest.py --pages 2 --per_page 50
 
-      - name: Run DAG orchestration (optional)
-        run: |
-          export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-          python dag_ingest.py
-        continue-on-error: true
-
       - name: Run ingestion tests
         run: |
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
           python -m pytest test_ingest.py -v
 
-      - name: Load Categories to BigQuery
+      - name: Load data into BigQuery
         run: |
-          bq load \
-            --source_format=PARQUET \
-            --noreplace \
-            ba882-team4-474802:ba882_jobs.categories \
-            gs://${{ secrets.BUCKET_NAME }}/processed/categories/*.parquet
-
-      - name: Load Companies to BigQuery
-        run: |
-          bq load \
-            --source_format=PARQUET \
-            --noreplace \
-            ba882-team4-474802:ba882_jobs.companies \
-            gs://${{ secrets.BUCKET_NAME }}/processed/companies/*.parquet
-
-      - name: Load Jobs to BigQuery
-        run: |
-          bq load \
-            --source_format=PARQUET \
-            --noreplace \
-            ba882-team4-474802:ba882_jobs.jobs \
-            gs://${{ secrets.BUCKET_NAME }}/processed/jobs/*.parquet
-
-      - name: Load JobStats to BigQuery
-        run: |
-          bq load \
-            --source_format=PARQUET \
-            --noreplace \
-            ba882-team4-474802:ba882_jobs.jobstats \
-            gs://${{ secrets.BUCKET_NAME }}/processed/jobstats/*.parquet
-
-      - name: Load Locations to BigQuery
-        run: |
-          bq load \
-            --source_format=PARQUET \
-            --noreplace \
-            ba882-team4-474802:ba882_jobs.locations \
-            gs://${{ secrets.BUCKET_NAME }}/processed/locations/*.parquet
+          for table in categories companies jobs jobstats locations; do
+            echo "🔹 Checking GCS files for $table ..."
+            FILES=$(gsutil ls gs://${{ secrets.BUCKET_NAME }}/processed/$table/*.parquet 2>/dev/null || true)
+            if [ -z "$FILES" ]; then
+              echo "⚠️ No Parquet files found for $table. Skipping BigQuery load."
+            else
+              echo "🚀 Loading $table to BigQuery..."
+              bq load \
+                --source_format=PARQUET \
+                --replace \
+                ba882-team4-474802:ba882_jobs.$table \
+                $FILES
+            fi
+          done
