@@ -17,23 +17,32 @@ PROCESSED_PREFIX = "processed"
 
 BASE_URL = "https://api.adzuna.com/v1/api/jobs/us/search"
 
-def fetch_data(pages=2, per_page=50):
-    """Fetch job data from Adzuna API."""
+def fetch_records():
     all_results = []
-    for page in range(1, pages + 1):
-        params = {
-            "app_id": ADZUNA_APP_ID,
-            "app_key": ADZUNA_APP_KEY,
-            "results_per_page": per_page,
-            "page": page,
-            "content-type": "application/json",
-        }
-        logger.info(f"Fetching page {page}")
-        response = requests.get(BASE_URL, params=params)
-        if response.status_code == 200:
-            all_results.extend(response.json().get("results", []))
-        else:
-            logger.error(f"Failed to fetch page {page}: {response.text}")
+    for page in range(1, MAX_PAGES + 1):
+        url = (
+            f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/{page}"
+            f"?app_id={APP_ID}"
+            f"&app_key={APP_KEY}"
+            f"&results_per_page={RESULTS_PER_PAGE}"
+            f"&what=data OR analytics OR research OR data science OR data analyst OR business intelligence"
+        )
+        logging.info(f"Fetching page {page}")
+        response = requests.get(url)
+        
+        if response.status_code != 200:
+            logging.error(f"Failed to fetch page {page}: {response.text[:300]}")
+            continue
+
+        try:
+            results = response.json().get("results", [])
+            all_results.extend(results)
+            sleep(1)  # be polite to API
+        except Exception as e:
+            logging.error(f"Error parsing page {page}: {e}")
+            continue
+    
+    logging.info(f"Fetched {len(all_results)} total jobs")
     return all_results
 
 
