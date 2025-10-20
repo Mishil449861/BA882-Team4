@@ -42,14 +42,22 @@ selected_company = st.selectbox("Select a company", company_list)
 def get_company_metrics(company_name: str):
     """
     Retrieves job metrics for the selected company.
+    Uses Streamlit secrets on Cloud; local file fallback for local dev.
     """
-    # Create a new BigQuery client inside the function to avoid scoping issues
     from google.cloud import bigquery
     from google.oauth2 import service_account
 
     project_id = "ba882-team4-474802"
-    key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-    credentials = service_account.Credentials.from_service_account_file(key_path)
+
+    # ✅ Use the same secrets logic as your main client
+    if "GCP_SERVICE_ACCOUNT" in st.secrets:
+        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+    else:
+        # local fallback
+        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+        credentials = service_account.Credentials.from_service_account_file(key_path)
+
     client = bigquery.Client(credentials=credentials, project=project_id)
 
     query = """
@@ -72,6 +80,7 @@ def get_company_metrics(company_name: str):
             bigquery.ScalarQueryParameter("company_name", "STRING", company_name)
         ]
     )
+
     df = client.query(query, job_config=job_config).to_dataframe()
     return df
 
