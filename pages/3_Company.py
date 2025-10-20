@@ -3,12 +3,22 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import pandas as pd
 
-# ✅ Load credentials from secrets (works locally and on Streamlit Cloud)
-credentials = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"]
-)
-project_id = credentials.project_id
-client = bigquery.Client(credentials=credentials, project=project_id)
+def get_bq_client():
+    project_id = "ba882-team4-474802"
+
+    # Streamlit Cloud: use secrets
+    if "GCP_SERVICE_ACCOUNT" in st.secrets:
+        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+    else:
+        # Local fallback (for your computer)
+        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+        credentials = service_account.Credentials.from_service_account_file(key_path)
+
+    return bigquery.Client(credentials=credentials, project=project_id)
+
+# ✅ Create client
+client = get_bq_client()
 
 st.title("🏢 Company-wise Hiring Dashboard")
 
