@@ -140,7 +140,8 @@ def transform(records: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataF
             "state": str(state) if state is not None else None,
             "country": str(country) if country is not None else None
         })
-
+        
+        
         # CATEGORIES
         cat = r.get("category") or {}
         categories_rows.append({
@@ -169,6 +170,9 @@ def transform(records: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataF
     jobs_df = pd.DataFrame(jobs_rows)
     companies_df = pd.DataFrame(companies_rows)
     locations_df = pd.DataFrame(locations_rows)
+    locations_df["city"] = locations_df["city"].astype(str)
+    locations_df["state"] = locations_df["state"].astype(str)
+    locations_df["country"] = locations_df["country"].astype(str)
     categories_df = pd.DataFrame(categories_rows)
     jobstats_df = pd.DataFrame(jobstats_rows)
 
