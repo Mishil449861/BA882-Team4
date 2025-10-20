@@ -23,6 +23,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install apache-airflow==2.9.1
+          pip install google-cloud-bigquery
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -41,13 +42,53 @@ jobs:
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
           python ingest.py --pages 2 --per_page 50
 
-      - name: Run DAG orchestration (if needed)
+      - name: Run DAG orchestration (optional)
         run: |
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
           python dag_ingest.py
-        continue-on-error: true  # Optional if dag_ingest.py is not always required
+        continue-on-error: true
 
       - name: Run ingestion tests
         run: |
           export PYTHONPATH="${PYTHONPATH}:$(pwd)"
           python -m pytest test_ingest.py -v
+
+      - name: Load Categories to BigQuery
+        run: |
+          bq load \
+            --source_format=PARQUET \
+            --noreplace \
+            ba882-team4-474802:ba882_jobs.categories \
+            gs://${{ secrets.BUCKET_NAME }}/processed/categories/*.parquet
+
+      - name: Load Companies to BigQuery
+        run: |
+          bq load \
+            --source_format=PARQUET \
+            --noreplace \
+            ba882-team4-474802:ba882_jobs.companies \
+            gs://${{ secrets.BUCKET_NAME }}/processed/companies/*.parquet
+
+      - name: Load Jobs to BigQuery
+        run: |
+          bq load \
+            --source_format=PARQUET \
+            --noreplace \
+            ba882-team4-474802:ba882_jobs.jobs \
+            gs://${{ secrets.BUCKET_NAME }}/processed/jobs/*.parquet
+
+      - name: Load JobStats to BigQuery
+        run: |
+          bq load \
+            --source_format=PARQUET \
+            --noreplace \
+            ba882-team4-474802:ba882_jobs.jobstats \
+            gs://${{ secrets.BUCKET_NAME }}/processed/jobstats/*.parquet
+
+      - name: Load Locations to BigQuery
+        run: |
+          bq load \
+            --source_format=PARQUET \
+            --noreplace \
+            ba882-team4-474802:ba882_jobs.locations \
+            gs://${{ secrets.BUCKET_NAME }}/processed/locations/*.parquet
