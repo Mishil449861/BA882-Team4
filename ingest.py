@@ -1,149 +1,169 @@
-# ingest.py
+"""
+ingest.py
+Purpose: Ingest Adzuna API data, process and export to GCS as Parquet files
+         for loading into BigQuery.
+"""
 
 import os
-import requests
+import hashlib
 import pandas as pd
-from datetime import datetime, timezone
+import requests
+from datetime import datetime
 from google.cloud import storage
-from tenacity import retry, stop_after_attempt, wait_exponential
-import argparse
 
-# --------------- CONFIG ---------------
-ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID")
-ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
-GCS_BUCKET = os.environ.get("BUCKET_NAME")
-COUNTRY = "us"
-# --------------------------------------
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential())
-def fetch_jobs(page=1, per_page=50):
-    """Fetch job listings from Adzuna API."""
-    url = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/{page}"
-    params = {
-        "app_id": ADZUNA_APP_ID,
-        "app_key": ADZUNA_APP_KEY,
-        "results_per_page": per_page,
-        "content-type": "application/json",
-    }
-    resp = requests.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    return resp.json().get("results", [])
+# -------------------
+# Helper: stable job_id
+# -------------------
+def stable_job_id(record):
+    """Return existing job ID if present, otherwise generate SHA256 hash."""
+    if record.get("id"):
+        return record["id"]
+    raw = (record.get("title", "") + record.get("company", {}).get("display_name", "") +
+           record.get("location", {}).get("display_name", "") +
+           record.get("created", ""))
+    return hashlib.sha256(raw.encode()).hexdigest()
 
+
+# -------------------
+# Fetch from Adzuna
+# -------------------
+def fetch_adzuna_jobs(pages=2, per_page=50):
+    """Fetch jobs from Adzuna API."""
+    app_id = os.getenv("ADZUNA_APP_ID")
+    app_key = os.getenv("ADZUNA_APP_KEY")
+
+    jobs = []
+    for page in range(1, pages + 1):
+        url = (
+            f"https://api.adzuna.com/v1/api/jobs/us/search/{page}"
+            f"?app_id={app_id}&app_key={app_key}&results_per_page={per_page}"
+            f"&what=data%20science"
+        )
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            jobs.extend(data.get("results", []))
+        else:
+            print(f"⚠️ Failed to fetch page {page}: {resp.status_code}")
+    return jobs
+
+
+# -------------------
+# Transform
+# -------------------
 def transform(records):
-    """Transform raw records into structured DataFrames for each table."""
-    jobs_data, companies_data, locations_data, categories_data, jobstats_data = [], [], [], [], []
-    now_ts = datetime.now(timezone.utc).isoformat()
-    today_str = datetime.utcnow().date().isoformat()
-
-    for r in records:
-        job_id = str(r.get("id"))
-        title = r.get("title")
-        description = r.get("description")
-        created = r.get("created")
-        salary_min = r.get("salary_min")
-        salary_max = r.get("salary_max")
-        redirect_url = r.get("redirect_url")
-
-        # ------------------- JOBS -------------------
-        jobs_data.append({
-            "job_id": job_id,
-            "title": title,
-            "description": description,
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "created": created,
-            "redirect_url": redirect_url,
-            "ingest_date": today_str,
-            "ingest_ts": now_ts
+    """Process raw records into a cleaned DataFrame."""
+    processed = []
+    for rec in records:
+        processed.append({
+            "job_id": stable_job_id(rec),
+            "title": rec.get("title"),
+            "company": rec.get("company", {}).get("display_name"),
+            "city": rec.get("location", {}).get("display_name"),
+            "state": rec.get("location", {}).get("area", [None, None, None])[-1],
+            "country": "US",
+            "salary_min": rec.get("salary_min"),
+            "salary_max": rec.get("salary_max"),
+            "created": rec.get("created"),
+            "redirect_url": rec.get("redirect_url"),
+            "category": rec.get("category", {}).get("label"),
+            "contract_type": rec.get("contract_type"),
+            "contract_time": rec.get("contract_time"),
+            "description": rec.get("description"),
+            "ingest_ts": datetime.utcnow().isoformat(),
+            "ingest_date": datetime.utcnow().date().isoformat(),
         })
 
-        # ------------------- COMPANIES -------------------
-        company_name = r.get("company", {}).get("display_name")
-        companies_data.append({
-            "job_id": job_id,
-            "company_name": company_name
-        })
+    df = pd.DataFrame(processed)
 
-        # ------------------- LOCATIONS (fixed) -------------------
-        loc = r.get("location", {})
-        area = loc.get("area") or []
+    # Normalize data types
+    for col in ["job_id", "title", "company", "city", "state", "country",
+                "redirect_url", "category", "contract_type", "contract_time", "description"]:
+        df[col] = df[col].astype(str)
 
-        country = "US"
-        state = None
-        city = None
-        if len(area) == 3:
-            country, state, city = area[0], area[1], area[2]
-        elif len(area) == 2:
-            country, state = area[0], area[1]
-        elif len(area) == 1:
-            country = area[0]
+    numeric_cols = ["salary_min", "salary_max"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        locations_data.append({
-            "job_id": job_id,
-            "city": city,
-            "state": state,
-            "country": country
-        })
+    return df
 
-        # ------------------- CATEGORIES -------------------
-        category_label = r.get("category", {}).get("label")
-        categories_data.append({
-            "job_id": job_id,
-            "category_label": category_label
-        })
 
-        # ------------------- JOBSTATS -------------------
-        contract_type = r.get("contract_type")
-        contract_time = r.get("contract_time")
-        posting_week = pd.to_datetime(created).isocalendar().week if created else None
-        jobstats_data.append({
-            "job_id": job_id,
-            "contract_type": contract_type,
-            "contract_time": contract_time,
-            "posting_week": posting_week
-        })
+# -------------------
+# Split tables
+# -------------------
+def split_tables(df):
+    """Split main DataFrame into 5 tables: jobs, jobstats, categories, companies, locations."""
+    jobs = df[[
+        "job_id", "title", "created", "redirect_url",
+        "contract_type", "contract_time", "description",
+        "ingest_ts", "ingest_date"
+    ]]
 
-    return (
-        pd.DataFrame(jobs_data),
-        pd.DataFrame(companies_data),
-        pd.DataFrame(locations_data),
-        pd.DataFrame(categories_data),
-        pd.DataFrame(jobstats_data),
+    jobstats = df[["job_id", "salary_min", "salary_max", "ingest_ts", "ingest_date"]]
+
+    categories = df[["job_id", "category", "ingest_ts", "ingest_date"]].drop_duplicates(subset=["category"])
+
+    companies = df[["job_id", "company", "ingest_ts", "ingest_date"]].drop_duplicates(subset=["company"])
+
+    locations = df[["job_id", "city", "state", "country", "ingest_ts", "ingest_date"]].drop_duplicates(
+        subset=["city", "state", "country"]
     )
 
-def upload_to_gcs(df: pd.DataFrame, prefix: str):
-    """Upload a DataFrame to GCS as Parquet, if not empty."""
-    if df.empty:
-        print(f"⚠️ Skipping upload for {prefix} — empty DataFrame")
-        return
+    # Ensure all text columns are strings (to fix schema mismatch)
+    for d in [jobs, jobstats, categories, companies, locations]:
+        for col in d.select_dtypes(exclude=["float", "int"]).columns:
+            d[col] = d[col].astype(str)
+
+    return jobs, jobstats, categories, companies, locations
+
+
+# -------------------
+# Save to Parquet + Upload
+# -------------------
+def save_and_upload(df, table_name):
+    """Save dataframe to parquet and upload to GCS."""
+    bucket_name = os.getenv("BUCKET_NAME")
+    gcs_path = f"processed/{table_name}/{table_name}_{datetime.utcnow().date()}.parquet"
+    local_path = f"/tmp/{table_name}.parquet"
+
+    # Ensure correct dtypes for BQ schema
+    if table_name == "locations":
+        df["city"] = df["city"].astype(str)
+        df["state"] = df["state"].astype(str)
+        df["country"] = df["country"].astype(str)
+        df["job_id"] = df["job_id"].astype(str)
+
+    df.to_parquet(local_path, index=False)
 
     client = storage.Client()
-    bucket = client.bucket(GCS_BUCKET)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(gcs_path)
+    blob.upload_from_filename(local_path)
+    print(f"✅ Uploaded {table_name} to gs://{bucket_name}/{gcs_path}")
 
-    file_name = f"processed/{prefix}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
-    tmp_file = f"/tmp/{prefix}.parquet"
-    df.to_parquet(tmp_file, index=False)
-    blob = bucket.blob(file_name)
-    blob.upload_from_filename(tmp_file)
 
-    print(f"✅ Uploaded {prefix} to gs://{GCS_BUCKET}/{file_name}")
+# -------------------
+# Main
+# -------------------
+def main(pages=2, per_page=50):
+    raw = fetch_adzuna_jobs(pages, per_page)
+    df = transform(raw)
+    jobs, jobstats, categories, companies, locations = split_tables(df)
 
-def main(pages: int, per_page: int):
-    all_records = []
-    for page in range(1, pages + 1):
-        all_records.extend(fetch_jobs(page, per_page))
+    # Save & upload each
+    for table_name, data in zip(
+        ["jobs", "jobstats", "categories", "companies", "locations"],
+        [jobs, jobstats, categories, companies, locations]
+    ):
+        save_and_upload(data, table_name)
 
-    jobs_df, companies_df, locations_df, categories_df, jobstats_df = transform(all_records)
-
-    upload_to_gcs(jobs_df, "jobs")
-    upload_to_gcs(companies_df, "companies")
-    upload_to_gcs(locations_df, "locations")
-    upload_to_gcs(categories_df, "categories")
-    upload_to_gcs(jobstats_df, "jobstats")
 
 if __name__ == "__main__":
+    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pages", type=int, default=1)
+    parser.add_argument("--pages", type=int, default=2)
     parser.add_argument("--per_page", type=int, default=50)
     args = parser.parse_args()
+
     main(args.pages, args.per_page)
