@@ -4,13 +4,25 @@ from google.oauth2 import service_account
 import pandas as pd
 import altair as alt
 
+# ✅ Secure BigQuery authentication
+def get_bq_client():
+    project_id = "ba882-team4-474802"
 
-# 인증 정보 설정
-project_id = "ba882-team4-474802"
-key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-credentials = service_account.Credentials.from_service_account_file(key_path)
-client = bigquery.Client(credentials=credentials, project=project_id)
+    # Streamlit Cloud: use secrets
+    if "GCP_SERVICE_ACCOUNT" in st.secrets:
+        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+    else:
+        # Local fallback (for your computer)
+        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+        credentials = service_account.Credentials.from_service_account_file(key_path)
 
+    return bigquery.Client(credentials=credentials, project=project_id)
+
+# ✅ Create client
+client = get_bq_client()
+
+# 🌟 Streamlit layout
 st.title("📂 Job Categories Dashboard")
 
 # 📌 카테고리별 공고 수 쿼리
@@ -49,7 +61,6 @@ def load_jobs_by_category(category):
 
 # 📊 막대 차트용 데이터 불러오기
 df_cat = load_category_data()
-# 🔝 상위 5개 카테고리 추출
 top5_df = df_cat.sort_values(by="job_count", ascending=False).head(5)
 
 # 📊 막대 차트 (Altair로)
