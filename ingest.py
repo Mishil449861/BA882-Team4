@@ -1,149 +1,157 @@
 # ingest.py
+# Purpose: Fetch Adzuna USA data jobs, transform into relational structure,
+# deduplicate, upload processed Parquet to GCS.
 
 import os
-import requests
-import pandas as pd
+import json
+import hashlib
+import tempfile
+import logging
 from datetime import datetime, timezone
-from google.cloud import storage
+from typing import List, Dict, Optional
+
+import pandas as pd
+import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
-import argparse
+from google.cloud import storage
 
-# --------------- CONFIG ---------------
-ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID")
-ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
-GCS_BUCKET = os.environ.get("BUCKET_NAME")
-COUNTRY = "us"
-# --------------------------------------
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential())
-def fetch_jobs(page=1, per_page=50):
-    """Fetch job listings from Adzuna API."""
-    url = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/{page}"
+ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID")
+ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY")
+BUCKET_NAME = os.getenv("BUCKET_NAME")
+GCP_PROJECT = os.getenv("GCP_PROJECT")
+
+# ------------------------
+# Helpers
+# ------------------------
+
+def upload_to_gcs(bucket_name: str, source_file: str, destination_blob: str):
+    """Uploads a file to Google Cloud Storage."""
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob)
+    blob.upload_from_filename(source_file)
+    logging.info(f"Uploaded {source_file} to gs://{bucket_name}/{destination_blob}")
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def fetch_jobs(page: int, results_per_page: int = 50) -> List[Dict]:
+    """Fetches jobs from Adzuna API with retries."""
+    url = f"https://api.adzuna.com/v1/api/jobs/us/search/{page}"
     params = {
         "app_id": ADZUNA_APP_ID,
         "app_key": ADZUNA_APP_KEY,
-        "results_per_page": per_page,
+        "results_per_page": results_per_page,
         "content-type": "application/json",
     }
     resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
-    return resp.json().get("results", [])
+    data = resp.json()
+    return data.get("results", [])
 
-def transform(records):
-    """Transform raw records into structured DataFrames for each table."""
-    jobs_data, companies_data, locations_data, categories_data, jobstats_data = [], [], [], [], []
-    now_ts = datetime.now(timezone.utc).isoformat()
-    today_str = datetime.utcnow().date().isoformat()
 
-    for r in records:
-        job_id = str(r.get("id"))
-        title = r.get("title")
-        description = r.get("description")
-        created = r.get("created")
-        salary_min = r.get("salary_min")
-        salary_max = r.get("salary_max")
-        redirect_url = r.get("redirect_url")
+def transform_data(jobs_data: List[Dict]):
+    """Transforms raw jobs into structured tables."""
+    jobs_records = []
+    categories_records = []
+    companies_records = []
+    locations_records = []
+    jobstats_records = []
 
-        # ------------------- JOBS -------------------
-        jobs_data.append({
+    for job in jobs_data:
+        job_id = str(job.get("id", ""))
+
+        # Jobs Table
+        jobs_records.append({
             "job_id": job_id,
-            "title": title,
-            "description": description,
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "created": created,
-            "redirect_url": redirect_url,
-            "ingest_date": today_str,
-            "ingest_ts": now_ts
+            "title": job.get("title"),
+            "description": job.get("description"),
+            "created": job.get("created"),
+            "redirect_url": job.get("redirect_url")
         })
 
-        # ------------------- COMPANIES -------------------
-        company_name = r.get("company", {}).get("display_name")
-        companies_data.append({
+        # Categories Table
+        if job.get("category"):
+            categories_records.append({
+                "job_id": job_id,
+                "category_label": job["category"].get("label")
+            })
+
+        # Companies Table
+        if job.get("company"):
+            companies_records.append({
+                "job_id": job_id,
+                "company_name": job["company"].get("display_name")
+            })
+
+        # Locations Table
+        if job.get("location"):
+            loc = job["location"].get("area", [])
+            city = loc[1] if len(loc) > 1 else None
+            state = loc[0] if len(loc) > 0 else None
+            locations_records.append({
+                "job_id": job_id,
+                "city": city,
+                "state": state,
+                "country": "US"
+            })
+
+        # Jobstats Table (example: number of words)
+        jobstats_records.append({
             "job_id": job_id,
-            "company_name": company_name
-        })
-
-        # ------------------- LOCATIONS (fixed) -------------------
-        loc = r.get("location", {})
-        area = loc.get("area") or []
-
-        country = "US"
-        state = None
-        city = None
-        if len(area) == 3:
-            country, state, city = area[0], area[1], area[2]
-        elif len(area) == 2:
-            country, state = area[0], area[1]
-        elif len(area) == 1:
-            country = area[0]
-
-        locations_data.append({
-            "job_id": str(job_id),
-            "city":str(city) if city is not None else None,
-            "state":str(state) if state is not None else None,
-            "country":str(country) if country is not None else None
-        })
-
-        # ------------------- CATEGORIES -------------------
-        category_label = r.get("category", {}).get("label")
-        categories_data.append({
-            "job_id": job_id,
-            "category_label": category_label
-        })
-
-        # ------------------- JOBSTATS -------------------
-        contract_type = r.get("contract_type")
-        contract_time = r.get("contract_time")
-        posting_week = pd.to_datetime(created).isocalendar().week if created else None
-        jobstats_data.append({
-            "job_id": job_id,
-            "contract_type": contract_type,
-            "contract_time": contract_time,
-            "posting_week": posting_week
+            "desc_word_count": len(job.get("description", "").split())
         })
 
     return (
-        pd.DataFrame(jobs_data),
-        pd.DataFrame(companies_data),
-        pd.DataFrame(locations_data),
-        pd.DataFrame(categories_data),
-        pd.DataFrame(jobstats_data),
+        pd.DataFrame(jobs_records),
+        pd.DataFrame(categories_records),
+        pd.DataFrame(companies_records),
+        pd.DataFrame(locations_records),
+        pd.DataFrame(jobstats_records)
     )
 
-def upload_to_gcs(df: pd.DataFrame, prefix: str):
-    """Upload a DataFrame to GCS as Parquet, if not empty."""
-    if df.empty:
-        print(f"⚠️ Skipping upload for {prefix} — empty DataFrame")
-        return
 
-    client = storage.Client()
-    bucket = client.bucket(GCS_BUCKET)
-
-    file_name = f"processed/{prefix}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
-    tmp_file = f"/tmp/{prefix}.parquet"
-    df.to_parquet(tmp_file, index=False)
-    blob = bucket.blob(file_name)
-    blob.upload_from_filename(tmp_file)
-
-    print(f"✅ Uploaded {prefix} to gs://{GCS_BUCKET}/{file_name}")
-
-def main(pages: int, per_page: int):
-    all_records = []
+def process_and_upload(pages: int = 2, per_page: int = 50):
+    all_jobs = []
     for page in range(1, pages + 1):
-        all_records.extend(fetch_jobs(page, per_page))
+        logging.info(f"Fetching page {page}")
+        jobs = fetch_jobs(page, per_page)
+        all_jobs.extend(jobs)
 
-    jobs_df, companies_df, locations_df, categories_df, jobstats_df = transform(all_records)
+    jobs_df, categories_df, companies_df, locations_df, jobstats_df = transform_data(all_jobs)
 
-    upload_to_gcs(jobs_df, "jobs")
-    upload_to_gcs(companies_df, "companies")
-    upload_to_gcs(locations_df, "locations")
-    upload_to_gcs(categories_df, "categories")
-    upload_to_gcs(jobstats_df, "jobstats")
+    # Fix schema: city → STRING (to avoid STRING vs INTEGER mismatch)
+    if "city" in locations_df.columns:
+        locations_df["city"] = locations_df["city"].fillna("").astype(str)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = {
+            "jobs": os.path.join(tmpdir, "jobs.parquet"),
+            "categories": os.path.join(tmpdir, "categories.parquet"),
+            "companies": os.path.join(tmpdir, "companies.parquet"),
+            "locations": os.path.join(tmpdir, "locations.parquet"),
+            "jobstats": os.path.join(tmpdir, "jobstats.parquet"),
+        }
+
+        jobs_df.to_parquet(paths["jobs"], index=False)
+        categories_df.to_parquet(paths["categories"], index=False)
+        companies_df.to_parquet(paths["companies"], index=False)
+        locations_df.to_parquet(paths["locations"], index=False)
+        jobstats_df.to_parquet(paths["jobstats"], index=False)
+
+        for table_name, file_path in paths.items():
+            destination_blob = f"processed/{table_name}/{os.path.basename(file_path)}"
+            upload_to_gcs(BUCKET_NAME, file_path, destination_blob)
+
 
 if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pages", type=int, default=1)
+    parser.add_argument("--pages", type=int, default=2)
     parser.add_argument("--per_page", type=int, default=50)
     args = parser.parse_args()
-    main(args.pages, args.per_page)
+
+    process_and_upload(args.pages, args.per_page)
