@@ -12,12 +12,12 @@ import argparse
 ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID")
 ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
 GCS_BUCKET = os.environ.get("BUCKET_NAME")
-GCS_PREFIX = "adzuna_ingest"
 COUNTRY = "us"
 # --------------------------------------
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential())
 def fetch_jobs(page=1, per_page=50):
+    """Fetch job listings from Adzuna API."""
     url = f"https://api.adzuna.com/v1/api/jobs/{COUNTRY}/search/{page}"
     params = {
         "app_id": ADZUNA_APP_ID,
@@ -30,8 +30,10 @@ def fetch_jobs(page=1, per_page=50):
     return resp.json().get("results", [])
 
 def transform(records):
+    """Transform raw records into structured DataFrames for each table."""
     jobs_data, companies_data, locations_data, categories_data, jobstats_data = [], [], [], [], []
     now_ts = datetime.now(timezone.utc).isoformat()
+    today_str = datetime.utcnow().date().isoformat()
 
     for r in records:
         job_id = str(r.get("id"))
@@ -51,6 +53,7 @@ def transform(records):
             "salary_max": salary_max,
             "created": created,
             "redirect_url": redirect_url,
+            "ingest_date": today_str,
             "ingest_ts": now_ts
         })
 
@@ -65,7 +68,6 @@ def transform(records):
         loc = r.get("location", {})
         area = loc.get("area") or []
 
-        # area looks like: ['US', 'California', 'Pleasant Hill, Contra Costa County']
         country = "US"
         state = None
         city = None
@@ -110,19 +112,27 @@ def transform(records):
     )
 
 def upload_to_gcs(df: pd.DataFrame, prefix: str):
+    """Upload a DataFrame to GCS as Parquet, if not empty."""
+    if df.empty:
+        print(f"⚠️ Skipping upload for {prefix} — empty DataFrame")
+        return
+
     client = storage.Client()
     bucket = client.bucket(GCS_BUCKET)
-    file_name = f"{GCS_PREFIX}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
+
+    file_name = f"processed/{prefix}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
     tmp_file = f"/tmp/{prefix}.parquet"
     df.to_parquet(tmp_file, index=False)
     blob = bucket.blob(file_name)
     blob.upload_from_filename(tmp_file)
+
     print(f"✅ Uploaded {prefix} to gs://{GCS_BUCKET}/{file_name}")
 
 def main(pages: int, per_page: int):
     all_records = []
     for page in range(1, pages + 1):
         all_records.extend(fetch_jobs(page, per_page))
+
     jobs_df, companies_df, locations_df, categories_df, jobstats_df = transform(all_records)
 
     upload_to_gcs(jobs_df, "jobs")
