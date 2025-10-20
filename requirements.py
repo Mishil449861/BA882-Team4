@@ -1,9 +1,0 @@
-streamlit
-matplotlib
-google-cloud-secret-manager
-google-cloud-bigquery
-google-auth
-google-auth-oauthlib
-pandas
-numpy
-db-dtypes 
