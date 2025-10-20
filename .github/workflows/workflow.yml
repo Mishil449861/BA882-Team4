@@ -89,7 +89,6 @@ jobs:
         run: |
           bq load \
             --source_format=PARQUET \
-            
             --noreplace \
             ba882-team4-474802:ba882_jobs.locations \
             gs://${{ secrets.BUCKET_NAME }}/processed/locations/*.parquet
