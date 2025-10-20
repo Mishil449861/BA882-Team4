@@ -79,10 +79,10 @@ def transform(records):
             country = area[0]
 
         locations_data.append({
-            "job_id": : str(job_id),
-            "city": str(city) if city is not None else None,
-            "state": str(state) if state is not None else None,
-            "country": str(country) if country is not None else None
+            "job_id": :str(job_id),
+            "city":str(city) if city is not None else None,
+            "state":str(state) if state is not None else None,
+            "country":str(country) if country is not None else None
         })
 
         # ------------------- CATEGORIES -------------------
