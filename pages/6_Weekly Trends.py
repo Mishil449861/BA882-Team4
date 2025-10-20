@@ -1,48 +1,61 @@
 import streamlit as st
-from google.cloud import bigquery
-from google.oauth2 import service_account
 import pandas as pd
 import altair as alt
+from gcp_utils import get_bq_client
 
-# 인증 설정
-project_id = "ba882-team4-474802"
-key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-credentials = service_account.Credentials.from_service_account_file(key_path)
-client = bigquery.Client(credentials=credentials, project=project_id)
+client = get_bq_client()
+st.title("📍 Location-Based Job Insights")
 
-st.title("📈 Weekly Job Posting Trends")
-
-# 캐시된 쿼리 함수
 @st.cache_data
-def get_weekly_trends():
-    query = """
+def get_city_insights(selected_category=None):
+    filter_clause = f"AND cat.category_label = '{selected_category}'" if selected_category else ""
+    query = f"""
         SELECT
-            FORMAT_DATE('%Y-%W', DATE(created)) AS week,
-            COUNT(*) AS job_count
-        FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE created IS NOT NULL
-        GROUP BY week
-        ORDER BY week
+            l.city,
+            COUNT(j.job_id) AS job_count,
+            ROUND(AVG(j.salary_min + j.salary_max)/2, 0) AS avg_salary
+        FROM `ba882-team4-474802.ba882_jobs.jobs` j
+        JOIN `ba882-team4-474802.ba882_jobs.locations` l ON j.job_id = l.job_id
+        JOIN `ba882-team4-474802.ba882_jobs.categories` cat ON j.job_id = cat.job_id
+        WHERE l.city IS NOT NULL
+        {filter_clause}
+        GROUP BY l.city
+        ORDER BY job_count DESC
+        LIMIT 10
     """
-    df = client.query(query).to_dataframe()
-    return df
+    return client.query(query).to_dataframe()
 
-df = get_weekly_trends()
+@st.cache_data
+def get_all_categories():
+    query = """
+        SELECT DISTINCT category_label
+        FROM `ba882-team4-474802.ba882_jobs.categories`
+        ORDER BY category_label
+    """
+    return client.query(query).to_dataframe()["category_label"].tolist()
 
-# 라인 차트로 표시
-st.subheader("🗓️ Weekly Job Postings")
-chart = (
-    alt.Chart(df)
-    .mark_line(point=True)
-    .encode(
-        x=alt.X("week:T", title="Week"),
-        y=alt.Y("job_count:Q", title="Number of Job Postings"),
-        tooltip=["week", "job_count"]
-    )
-    .properties(width=700, height=400)
-)
-st.altair_chart(chart, use_container_width=True)
+st.sidebar.subheader("🔎 Filter by Category")
+categories = get_all_categories()
+selected_category = st.sidebar.selectbox("Choose a category (optional):", ["All"] + categories)
 
-# 테이블로도 보기
-with st.expander("📄 Show Raw Weekly Data"):
-    st.dataframe(df)
+df = get_city_insights(None if selected_category == "All" else selected_category)
+
+if df.empty:
+    st.warning("No data available for this category.")
+else:
+    st.subheader("🏙️ Top Cities by Job Count")
+    chart = alt.Chart(df).mark_bar().encode(
+        x=alt.X("city:N", sort='-y', title="City"),
+        y=alt.Y("job_count:Q", title="Job Count"),
+        tooltip=["city", "job_count", "avg_salary"]
+    ).properties(height=400)
+    st.altair_chart(chart, use_container_width=True)
+
+    st.subheader("💰 Average Salary by City")
+    col1, col2, col3 = st.columns(3)
+    top_salary = df.sort_values("avg_salary", ascending=False).iloc[0]
+    col1.metric("Highest Paying City", top_salary["city"], f"${top_salary['avg_salary']:,}")
+
+    avg_overall = int(df["avg_salary"].mean())
+    col2.metric("Average Across Top Cities", f"${avg_overall:,}")
+    col3.metric("Category Filter", selected_category if selected_category != "All" else "None")
