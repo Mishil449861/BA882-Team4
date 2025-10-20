@@ -2,7 +2,6 @@
 # Purpose: tests for the simplified processed job ingestion (Data Science–specific).
 
 import pandas as pd
-from ingest import stable_job_id, transform
 
 
 def sample_record(id_val=None, title="Data Scientist", company="ACME Analytics", location="New York"):
