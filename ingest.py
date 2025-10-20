@@ -193,16 +193,27 @@ def transform(records: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataF
 # ----------------------------
 # GCS upload helper (optional)
 # ----------------------------
-def upload_df_to_gcs(df: pd.DataFrame, prefix: str, bucket_name: Optional[str] = None) -> str:
-    """Upload a DataFrame as parquet to GCS under processed/<prefix>/ and return gs:// path."""
-    bucket = bucket_name or GCS_BUCKET
-    if not bucket:
-        raise RuntimeError("GCS bucket not configured via BUCKET_NAME environment variable.")
+def upload_to_gcs(df: pd.DataFrame, prefix: str):
     if df.empty:
-        logger.info("Skipping upload for %s: DataFrame is empty", prefix)
-        return ""
+        print(f"⚠️ Skipping upload for {prefix} — empty DataFrame")
+        return
+
+    # ensure textual columns are string dtype so Parquet metadata has STRING
+    if prefix == "locations":
+        for c in ("city", "state", "country"):
+            if c in df.columns:
+                df[c] = df[c].where(pd.notnull(df[c]), None).astype("string")
 
     client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET)
+    file_name = f"processed/{prefix}/{prefix}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.parquet"
+    tmp_file = f"/tmp/{prefix}.parquet"
+    # use pyarrow engine explicitly
+    df.to_parquet(tmp_file, index=False, engine="pyarrow")
+    blob = bucket.blob(file_name)
+    blob.upload_from_filename(tmp_file)
+    print(f"✅ Uploaded {prefix} to gs://{GCS_BUCKET}/{file_name}")
+
     b = client.bucket(bucket)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     path = f"{PROCESSED_PREFIX}/{prefix}/{prefix}_{ts}.parquet"
