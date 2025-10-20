@@ -1,22 +1,14 @@
 import streamlit as st
-from google.cloud import bigquery
-from google.oauth2 import service_account
 import pandas as pd
+from gcp_utils import get_bq_client
 
-# GCP 인증 정보
-project_id = "ba882-team4-474802"
-key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-credentials = service_account.Credentials.from_service_account_file(key_path)
-client = bigquery.Client(credentials=credentials, project=project_id)
+client = get_bq_client()
 
-# 페이지 타이틀
 st.title("🔍 Job Title Explorer")
 st.caption("Enter a keyword to search job titles (e.g. 'data', 'engineer', etc.)")
 
-# 사용자 입력
 keyword = st.text_input("🔎 Search for job titles:")
 
-# 쿼리 실행 함수
 @st.cache_data
 def search_jobs_by_keyword(kw):
     query = f"""
@@ -37,18 +29,13 @@ def search_jobs_by_keyword(kw):
     """
     return client.query(query).to_dataframe()
 
-# 검색 수행
 if keyword:
     results_df = search_jobs_by_keyword(keyword)
-
     if not results_df.empty:
         st.markdown(f"#### Showing results for: **{keyword}**")
-
-        # 테이블 표시 (요약 정보)
         display_cols = ["title", "company_name", "category_label", "city", "state", "country"]
         st.dataframe(results_df[display_cols])
 
-        # 사용자가 보고 싶은 직무 선택
         job_titles = results_df["title"] + " at " + results_df["company_name"]
         selected_job = st.selectbox("📌 Select a job to view full description:", job_titles)
 
