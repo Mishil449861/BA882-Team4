@@ -10,14 +10,14 @@ st.title("🏢 Company Insights Dashboard")
 def get_company_insights():
     query = """
         SELECT
-            c.`row.company_name` AS company_name,
-            COUNT(j.`row.job_id`) AS job_count,
-            ROUND(AVG((j.`row.salary_min` + j.`row.salary_max`)/2), 0) AS avg_salary,
-            MAX(j.`row.created`) AS last_posted
+            c.row.company_name AS company_name,
+            COUNT(j.row.job_id) AS job_count,
+            ROUND(AVG((j.row.salary_min + j.row.salary_max)/2), 0) AS avg_salary,
+            MAX(j.row.created) AS last_posted
         FROM `ba882-team4-474802.ba882_jobs.jobs` j
         JOIN `ba882-team4-474802.ba882_jobs.companies` c
-        ON j.`row.job_id` = c.`row.job_id`
-        WHERE c.`row.company_name` IS NOT NULL
+          ON j.row.job_id = c.row.job_id
+        WHERE c.row.company_name IS NOT NULL
         GROUP BY company_name
         ORDER BY job_count DESC
         LIMIT 15
