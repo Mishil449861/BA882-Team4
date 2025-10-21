@@ -3,26 +3,21 @@ from google.cloud import bigquery
 
 from google.oauth2 import service_account
 
-project_id = "ba882-team4-474802"
+def get_bq_client():
+    project_id = "ba882-team4-474802"
 
-if "GCP_SERVICE_ACCOUNT" in st.secrets:
-    key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
-    credentials = service_account.Credentials.from_service_account_info(dict(key_info))
-else:
-    key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-    credentials = service_account.Credentials.from_service_account_file(key_path)
-    
-@st.cache_data
-def get_company_list():
-    """Fetch distinct company names for dropdown."""
-    query = """
-        SELECT DISTINCT row.company
-        FROM `ba882-team4.jobs_cleaned` AS c
-        WHERE row.company IS NOT NULL
-        ORDER BY row.company
-    """
-    return client.query(query).to_dataframe()
-client = bigquery.Client(credentials=credentials, project=project_id)
+    if "GCP_SERVICE_ACCOUNT" in st.secrets:
+        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+    else:
+        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+        credentials = service_account.Credentials.from_service_account_file(key_path)
+
+    return bigquery.Client(credentials=credentials, project=project_id)
+
+
+# ✅ Initialize client
+client = get_bq_client()
 
 @st.cache_data
 def get_company_jobs(selected_company):
