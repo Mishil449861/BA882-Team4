@@ -39,6 +39,7 @@ def load_category_data():
         ORDER BY job_count DESC
     """
     return client.query(query).to_dataframe()
+
 # ========================================
 # 📋 JOBS UNDER SELECTED CATEGORY
 # ========================================
@@ -54,10 +55,10 @@ def load_jobs_by_category(category):
             j.row.redirect_url
         FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
         JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
-            ON j.row.job_id = cat.row.job_id
+            ON j.row.job_id = cat.job_id
         LEFT JOIN `ba882-team4-474802.ba882_jobs.companies` AS c
             ON j.row.job_id = c.row.job_id
-        WHERE cat.row.category_label = @category
+        WHERE cat.category_label = @category
         ORDER BY j.row.created DESC
         LIMIT 100
     """
