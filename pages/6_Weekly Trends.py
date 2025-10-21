@@ -18,7 +18,7 @@ def fetch_daily_posting_trends():
           DATE(created) AS created,
           COUNT(*) AS job_count
         FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE posted_date IS NOT NULL
+        WHERE created IS NOT NULL
         GROUP BY created
         ORDER BY created
     """
