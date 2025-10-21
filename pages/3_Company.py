@@ -1,8 +1,17 @@
 import streamlit as st
 from google.cloud import bigquery
 
-client = bigquery.Client()
+from google.oauth2 import service_account
 
+project_id = "ba882-team4-474802"
+
+if "GCP_SERVICE_ACCOUNT" in st.secrets:
+    key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+    credentials = service_account.Credentials.from_service_account_info(dict(key_info))
+else:
+    key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
+    credentials = service_account.Credentials.from_service_account_file(key_path)
+    
 @st.cache_data
 def get_company_list():
     """Fetch distinct company names for dropdown."""
