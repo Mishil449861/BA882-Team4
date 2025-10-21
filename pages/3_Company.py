@@ -1,49 +1,84 @@
 import streamlit as st
-import pandas as pd
-import altair as alt
-from gcp_utils import get_bq_client
+from google.cloud import bigquery
 
-client = get_bq_client()
-st.title("🏢 Company Insights Dashboard")
+client = bigquery.Client()
+
+@st.cache_data
+def get_company_list():
+    """Fetch distinct company names for dropdown."""
+    query = """
+        SELECT DISTINCT row.company
+        FROM `ba882-team4.jobs_cleaned` AS c
+        WHERE row.company IS NOT NULL
+        ORDER BY row.company
+    """
+    return client.query(query).to_dataframe()
+
+@st.cache_data
+def get_company_jobs(selected_company):
+    """Fetch jobs for a selected company."""
+    query = f"""
+        SELECT
+            row.company AS company,
+            row.title AS job_title,
+            row.location AS location,
+            row.category AS category,
+            row.salary_min AS min_salary,
+            row.salary_max AS max_salary,
+            row.created AS date_posted
+        FROM `ba882-team4.jobs_cleaned` AS c
+        WHERE row.company = @company
+        ORDER BY row.created DESC
+        LIMIT 50
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("company", "STRING", selected_company)
+        ]
+    )
+    return client.query(query, job_config).to_dataframe()
+
+# --- UI ---
+
+st.title("🏢 Company Insights")
+
+# Dropdown for company selection
+company_df = get_company_list()
+company_names = company_df["company"].tolist()
+
+selected_company = st.selectbox("Select a company to view its jobs:", company_names)
+
+if selected_company:
+    st.subheader(f"Job listings for **{selected_company}**")
+    df_jobs = get_company_jobs(selected_company)
+
+    if df_jobs.empty:
+        st.warning("No job listings found for this company.")
+    else:
+        st.dataframe(df_jobs)
+
+# Existing company insights (optional)
+st.markdown("---")
+st.subheader("Top Companies by Job Count")
 
 @st.cache_data
 def get_company_insights():
     query = """
         SELECT
-            c.company_name AS company_name,
-            COUNT(j.row.job_id) AS job_count,
-            ROUND(AVG((j.row.salary_min + j.row.salary_max)/2), 0) AS avg_salary,
-            MAX(j.row.created) AS last_posted
-        FROM `ba882-team4-474802.ba882_jobs.jobs` j
-        JOIN `ba882-team4-474802.ba882_jobs.companies` c
-          ON j.row.job_id = c.job_id
-        WHERE c.company_name IS NOT NULL
-        GROUP BY company_name
+            row.company AS company,
+            COUNT(*) AS job_count,
+            AVG(row.salary_min) AS avg_min_salary,
+            AVG(row.salary_max) AS avg_max_salary
+        FROM `ba882-team4.jobs_cleaned` AS c
+        WHERE row.company IS NOT NULL
+        GROUP BY row.company
         ORDER BY job_count DESC
         LIMIT 15
     """
     return client.query(query).to_dataframe()
 
 df = get_company_insights()
-
 if df.empty:
     st.warning("No data available for company insights.")
 else:
-    st.subheader("🏆 Top Companies by Job Count")
-    chart = alt.Chart(df).mark_bar(color="#4B9CD3").encode(
-        x=alt.X("company_name:N", sort='-y', title="Company"),
-        y=alt.Y("job_count:Q", title="Number of Job Postings"),
-        tooltip=["company_name", "job_count", "avg_salary", "last_posted"]
-    ).properties(height=400)
-    st.altair_chart(chart, use_container_width=True)
-
-    st.subheader("💰 Salary Insights")
-    col1, col2, col3 = st.columns(3)
-    top_salary = df.sort_values("avg_salary", ascending=False).iloc[0]
-    col1.metric("Highest Paying Company", top_salary["company_name"], f"${top_salary['avg_salary']:,}")
-
-    avg_overall = int(df["avg_salary"].mean())
-    col2.metric("Average Salary Across Companies", f"${avg_overall:,}")
-
-    latest_post = df["last_posted"].max()
-    col3.metric("Most Recent Posting Date", str(latest_post)[:10])
+    st.dataframe(df)
