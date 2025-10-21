@@ -19,9 +19,9 @@ client = bigquery.Client(credentials=credentials, project=project_id)
 def get_company_list():
     """Fetch distinct company names for dropdown."""
     query = """
-        SELECT DISTINCT row.company_name AS company
-        FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company_name IS NOT NULL
+        SELECT DISTINCT company_name AS company
+        FROM `ba882-team4-474802.ba882_jobs.companies`
+        WHERE company_name IS NOT NULL
         ORDER BY company
     """
     return client.query(query).to_dataframe()
@@ -29,19 +29,21 @@ def get_company_list():
 
 @st.cache_data
 def get_company_jobs(selected_company):
-    """Fetch jobs for a selected company."""
+    """Fetch jobs for a selected company by joining companies and jobs tables."""
     query = """
         SELECT
-            row.company_name AS company,
-            row.title AS job_title,
-            row.location AS location,
-            row.category AS category,
-            row.salary_min AS min_salary,
-            row.salary_max AS max_salary,
-            row.created AS date_posted
-        FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company_name = @company
-        ORDER BY row.created DESC
+            c.company_name AS company,
+            j.row.title AS job_title,
+            j.row.description AS description,
+            j.row.salary_min AS min_salary,
+            j.row.salary_max AS max_salary,
+            j.row.created AS date_posted,
+            j.row.redirect_url AS job_url
+        FROM `ba882-team4-474802.ba882_jobs.companies` AS c
+        JOIN `ba882-team4-474802.ba882_jobs.jobs` AS j
+        ON c.job_id = j.row.job_id
+        WHERE c.company_name = @company
+        ORDER BY j.row.created DESC
         LIMIT 50
     """
     job_config = bigquery.QueryJobConfig(
@@ -57,12 +59,14 @@ def get_company_insights():
     """Fetch top companies by job count and average salaries."""
     query = """
         SELECT
-            row.company_name AS company,
+            c.company_name AS company,
             COUNT(*) AS job_count,
-            AVG(row.salary_min) AS avg_min_salary,
-            AVG(row.salary_max) AS avg_max_salary
-        FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company_name IS NOT NULL
+            AVG(j.row.salary_min) AS avg_min_salary,
+            AVG(j.row.salary_max) AS avg_max_salary
+        FROM `ba882-team4-474802.ba882_jobs.companies` AS c
+        JOIN `ba882-team4-474802.ba882_jobs.jobs` AS j
+        ON c.job_id = j.row.job_id
+        WHERE c.company_name IS NOT NULL
         GROUP BY company
         ORDER BY job_count DESC
         LIMIT 15
