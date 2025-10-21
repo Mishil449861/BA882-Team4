@@ -17,6 +17,7 @@ def get_bq_client():
 
     return bigquery.Client(credentials=credentials, project=project_id)
 
+
 # ✅ Initialize client
 client = get_bq_client()
 
@@ -40,6 +41,7 @@ def load_category_data():
     """
     return client.query(query).to_dataframe()
 
+
 # ========================================
 # 📋 JOBS UNDER SELECTED CATEGORY
 # ========================================
@@ -48,7 +50,7 @@ def load_jobs_by_category(category):
     query = """
         SELECT 
             j.row.title AS job_title,
-            COALESCE(c.row.company_name, "N/A") AS company_name,
+            COALESCE(c.row.company_name, 'N/A') AS company_name,
             j.row.salary_min,
             j.row.salary_max,
             j.row.created,
@@ -68,7 +70,13 @@ def load_jobs_by_category(category):
             bigquery.ScalarQueryParameter("category", "STRING", category)
         ]
     )
-    return client.query(query, job_config).to_dataframe()
+
+    try:
+        return client.query(query, job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"❌ BigQuery Error: {e}")
+        return pd.DataFrame()
+
 
 # ========================================
 # 📈 BAR CHART OF TOP 5 CATEGORIES
@@ -98,6 +106,11 @@ selected_category = st.sidebar.selectbox("Choose category", df_cat["category_lab
 if selected_category:
     jobs_df = load_jobs_by_category(selected_category)
     st.subheader(f"🗂️ Jobs in {selected_category}")
-    st.dataframe(
-        jobs_df[["job_title", "company_name", "salary_min", "salary_max", "created", "redirect_url"]]
-    )
+    if not jobs_df.empty:
+        st.dataframe(
+            jobs_df[
+                ["job_title", "company_name", "salary_min", "salary_max", "created", "redirect_url"]
+            ]
+        )
+    else:
+        st.info("No jobs found for this category.")
