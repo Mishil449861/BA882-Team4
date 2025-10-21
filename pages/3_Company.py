@@ -19,9 +19,9 @@ client = bigquery.Client(credentials=credentials, project=project_id)
 def get_company_list():
     """Fetch distinct company names for dropdown."""
     query = """
-        SELECT DISTINCT row.company.display_name AS company
+        SELECT DISTINCT row.company_name AS company
         FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company.display_name IS NOT NULL
+        WHERE row.company_name IS NOT NULL
         ORDER BY company
     """
     return client.query(query).to_dataframe()
@@ -32,7 +32,7 @@ def get_company_jobs(selected_company):
     """Fetch jobs for a selected company."""
     query = """
         SELECT
-            row.company.display_name AS company,
+            row.company_name AS company,
             row.title AS job_title,
             row.location AS location,
             row.category AS category,
@@ -40,7 +40,7 @@ def get_company_jobs(selected_company):
             row.salary_max AS max_salary,
             row.created AS date_posted
         FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company.display_name = @company
+        WHERE row.company_name = @company
         ORDER BY row.created DESC
         LIMIT 50
     """
@@ -57,12 +57,12 @@ def get_company_insights():
     """Fetch top companies by job count and average salaries."""
     query = """
         SELECT
-            row.company.display_name AS company,
+            row.company_name AS company,
             COUNT(*) AS job_count,
             AVG(row.salary_min) AS avg_min_salary,
             AVG(row.salary_max) AS avg_max_salary
         FROM `ba882-team4-474802.ba882_jobs.jobs`
-        WHERE row.company.display_name IS NOT NULL
+        WHERE row.company_name IS NOT NULL
         GROUP BY company
         ORDER BY job_count DESC
         LIMIT 15
