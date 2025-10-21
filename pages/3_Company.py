@@ -1,102 +1,49 @@
 import streamlit as st
-from google.cloud import bigquery
-from google.oauth2 import service_account
 import pandas as pd
+import altair as alt
+from gcp_utils import get_bq_client
 
-def get_bq_client():
-    project_id = "ba882-team4-474802"
-
-    # Streamlit Cloud: use secrets
-    if "GCP_SERVICE_ACCOUNT" in st.secrets:
-        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
-        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
-    else:
-        # Local fallback (for your computer)
-        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-        credentials = service_account.Credentials.from_service_account_file(key_path)
-
-    return bigquery.Client(credentials=credentials, project=project_id)
-
-# ✅ Create client
 client = get_bq_client()
+st.title("🏢 Company Insights Dashboard")
 
-st.title("🏢 Company-wise Hiring Dashboard")
-
-# --- Fetch company list ---
 @st.cache_data
-def get_company_list():
-    query = """
-        SELECT DISTINCT company_name
-        FROM `ba882-team4-474802.ba882_jobs.companies`
-        WHERE company_name IS NOT NULL
-        ORDER BY company_name
-    """
-    df = client.query(query).to_dataframe()
-    return df["company_name"].tolist()
-
-company_list = get_company_list()
-selected_company = st.selectbox("Select a company", company_list)
-
-# --- Fetch company-specific metrics ---
-@st.cache_data
-def get_company_metrics(company_name: str):
-    """
-    Retrieves job metrics for the selected company.
-    Uses Streamlit secrets on Cloud; local file fallback for local dev.
-    """
-    from google.cloud import bigquery
-    from google.oauth2 import service_account
-
-    project_id = "ba882-team4-474802"
-
-    # ✅ Use the same secrets logic as your main client
-    if "GCP_SERVICE_ACCOUNT" in st.secrets:
-        key_info = st.secrets["GCP_SERVICE_ACCOUNT"]
-        credentials = service_account.Credentials.from_service_account_info(dict(key_info))
-    else:
-        # local fallback
-        key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
-        credentials = service_account.Credentials.from_service_account_file(key_path)
-
-    client = bigquery.Client(credentials=credentials, project=project_id)
-
+def get_company_insights():
     query = """
         SELECT
-            j.title,
             c.company_name,
-            cat.category_label,
-            j.salary_min,
-            j.salary_max
-        FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
-        JOIN `ba882-team4-474802.ba882_jobs.companies` AS c
-            ON j.job_id = c.job_id
-        JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
-            ON j.job_id = cat.job_id
-        WHERE c.company_name = @company_name
+            COUNT(j.job_id) AS job_count,
+            ROUND(AVG((j.salary_min + j.salary_max)/2), 0) AS avg_salary,
+            MAX(j.created) AS last_posted
+        FROM `ba882-team4-474802.ba882_jobs.jobs` j
+        JOIN `ba882-team4-474802.ba882_jobs.companies` c
+        ON j.job_id = c.job_id
+        WHERE c.company_name IS NOT NULL
+        GROUP BY c.company_name
+        ORDER BY job_count DESC
+        LIMIT 15
     """
+    return client.query(query).to_dataframe()
 
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("company_name", "STRING", company_name)
-        ]
-    )
+df = get_company_insights()
 
-    df = client.query(query, job_config=job_config).to_dataframe()
-    return df
-
-# Run the query
-company_df = get_company_metrics(selected_company)
-
-# --- Display KPIs ---
-if not company_df.empty:
-    total_postings = len(company_df)
-    avg_salary = round(((company_df["salary_min"] + company_df["salary_max"]) / 2).mean())
-
-    col1, col2 = st.columns(2)
-    col1.metric("📌 Total Postings", f"{total_postings:,}")
-    col2.metric("💰 Avg. Salary", f"${avg_salary:,}")
-
-    st.subheader(f"📋 Job Titles at {selected_company}")
-    st.dataframe(company_df[["title", "category_label"]])
+if df.empty:
+    st.warning("No data available for company insights.")
 else:
-    st.warning("No job data available for this company.")
+    st.subheader("🏆 Top Companies by Job Count")
+    chart = alt.Chart(df).mark_bar(color="#4B9CD3").encode(
+        x=alt.X("company_name:N", sort='-y', title="Company"),
+        y=alt.Y("job_count:Q", title="Number of Job Postings"),
+        tooltip=["company_name", "job_count", "avg_salary", "last_posted"]
+    ).properties(height=400)
+    st.altair_chart(chart, use_container_width=True)
+
+    st.subheader("💰 Salary Insights")
+    col1, col2, col3 = st.columns(3)
+    top_salary = df.sort_values("avg_salary", ascending=False).iloc[0]
+    col1.metric("Highest Paying Company", top_salary["company_name"], f"${top_salary['avg_salary']:,}")
+
+    avg_overall = int(df["avg_salary"].mean())
+    col2.metric("Average Salary Across Companies", f"${avg_overall:,}")
+
+    latest_post = df["last_posted"].max()
+    col3.metric("Most Recent Posting Date", str(latest_post)[:10])
