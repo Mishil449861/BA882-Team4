@@ -55,7 +55,7 @@ col3.metric("🗂️ Categories", f"{total_categories:,}")
 col4, col5 = st.columns([1, 2])  # wider second column to avoid truncation
 col4.metric("💰 Average Salary", f"${avg_salary:,}")
 col5.markdown(
-    f"### 🔥 Most Popular Job Category\n<span style='font-size:22px'>{popular_category}</span>",
+    f"### 🔥 Most Popular Job Category\n<span style='font-size:12px'>{popular_category}</span>",
     unsafe_allow_html=True
 )
 
