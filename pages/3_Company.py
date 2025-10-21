@@ -2,7 +2,7 @@ import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
-# --- Setup ---
+# --- GCP setup ---
 project_id = "ba882-team4-474802"
 
 if "GCP_SERVICE_ACCOUNT" in st.secrets:
@@ -12,24 +12,24 @@ else:
     key_path = "/home/jin1221/gcp/ba882-team4-474802-123e6d60061f.json"
     credentials = service_account.Credentials.from_service_account_file(key_path)
 
-# ✅ Initialize client BEFORE using it
 client = bigquery.Client(credentials=credentials, project=project_id)
 
-# --- Query functions ---
+# --- Cached queries ---
 @st.cache_data
 def get_company_list():
     """Fetch distinct company names for dropdown."""
     query = """
         SELECT DISTINCT row.company
-        FROM `ba882-team4.jobs_cleaned` AS c
+        FROM `ba882-team4-474802.ba882_jobs.jobs`
         WHERE row.company IS NOT NULL
         ORDER BY row.company
     """
     return client.query(query).to_dataframe()
 
+
 @st.cache_data
 def get_company_jobs(selected_company):
-    """Fetch jobs for a selected company."""
+    """Fetch job listings for a selected company."""
     query = """
         SELECT
             row.company AS company,
@@ -39,7 +39,7 @@ def get_company_jobs(selected_company):
             row.salary_min AS min_salary,
             row.salary_max AS max_salary,
             row.created AS date_posted
-        FROM `ba882-team4.jobs_cleaned` AS c
+        FROM `ba882-team4-474802.ba882_jobs.jobs`
         WHERE row.company = @company
         ORDER BY row.created DESC
         LIMIT 50
@@ -51,16 +51,17 @@ def get_company_jobs(selected_company):
     )
     return client.query(query, job_config).to_dataframe()
 
+
 @st.cache_data
 def get_company_insights():
-    """Fetch top companies by job count."""
+    """Fetch company-level summary statistics."""
     query = """
         SELECT
             row.company AS company,
             COUNT(*) AS job_count,
             AVG(row.salary_min) AS avg_min_salary,
             AVG(row.salary_max) AS avg_max_salary
-        FROM `ba882-team4.jobs_cleaned` AS c
+        FROM `ba882-team4-474802.ba882_jobs.jobs`
         WHERE row.company IS NOT NULL
         GROUP BY row.company
         ORDER BY job_count DESC
@@ -68,14 +69,17 @@ def get_company_insights():
     """
     return client.query(query).to_dataframe()
 
+
 # --- UI ---
 st.title("🏢 Company Insights")
 
+# Dropdown
 company_df = get_company_list()
 company_names = company_df["company"].tolist()
 
 selected_company = st.selectbox("Select a company to view its jobs:", company_names)
 
+# Show company-specific jobs
 if selected_company:
     st.subheader(f"Job listings for **{selected_company}**")
     df_jobs = get_company_jobs(selected_company)
@@ -85,11 +89,12 @@ if selected_company:
     else:
         st.dataframe(df_jobs)
 
+# --- Insights section ---
 st.markdown("---")
 st.subheader("Top Companies by Job Count")
 
-df = get_company_insights()
-if df.empty:
+df_insights = get_company_insights()
+if df_insights.empty:
     st.warning("No data available for company insights.")
 else:
-    st.dataframe(df)
+    st.dataframe(df_insights)
