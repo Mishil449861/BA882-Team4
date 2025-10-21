@@ -4,9 +4,7 @@ from google.oauth2 import service_account
 import pandas as pd
 import altair as alt
 
-# ========================================
-# 🔐 BigQuery authentication
-# ========================================
+# ✅ BigQuery authentication
 def get_bq_client():
     project_id = "ba882-team4-474802"
 
@@ -18,7 +16,6 @@ def get_bq_client():
         credentials = service_account.Credentials.from_service_account_file(key_path)
 
     return bigquery.Client(credentials=credentials, project=project_id)
-
 
 # ✅ Initialize client
 client = get_bq_client()
@@ -33,16 +30,15 @@ st.title("📂 Job Categories Dashboard")
 def load_category_data():
     query = """
         SELECT
-            cat.category_label,
-            COUNT(DISTINCT j.job_id) AS job_count
+            cat.row.category_label AS category_label,
+            COUNT(DISTINCT j.row.job_id) AS job_count
         FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
-        INNER JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
-            ON j.job_id = cat.job_id
-        GROUP BY cat.category_label
+        JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
+            ON j.row.job_id = cat.row.job_id
+        GROUP BY cat.row.category_label
         ORDER BY job_count DESC
     """
     return client.query(query).to_dataframe()
-
 
 # ========================================
 # 📋 JOBS UNDER SELECTED CATEGORY
@@ -51,19 +47,19 @@ def load_category_data():
 def load_jobs_by_category(category):
     query = """
         SELECT 
-            j.title AS job_title,
-            COALESCE(c.company_name, "N/A") AS company_name,
-            j.salary_min,
-            j.salary_max,
-            j.created,
-            j.redirect_url
+            j.row.title AS job_title,
+            COALESCE(c.row.company_name, "N/A") AS company_name,
+            j.row.salary_min,
+            j.row.salary_max,
+            j.row.created,
+            j.row.redirect_url
         FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
-        INNER JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
-            ON j.job_id = cat.job_id
+        JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
+            ON j.row.job_id = cat.row.job_id
         LEFT JOIN `ba882-team4-474802.ba882_jobs.companies` AS c
-            ON j.job_id = c.job_id
-        WHERE cat.category_label = @category
-        ORDER BY j.created DESC
+            ON j.row.job_id = c.row.job_id
+        WHERE cat.row.category_label = @category
+        ORDER BY j.row.created DESC
         LIMIT 100
     """
 
@@ -72,9 +68,7 @@ def load_jobs_by_category(category):
             bigquery.ScalarQueryParameter("category", "STRING", category)
         ]
     )
-
-    return client.query(query, job_config=job_config).to_dataframe()
-
+    return client.query(query, job_config).to_dataframe()
 
 # ========================================
 # 📈 BAR CHART OF TOP 5 CATEGORIES
@@ -83,7 +77,6 @@ df_cat = load_category_data()
 top5_df = df_cat.head(5)
 
 st.subheader("📊 Top 5 Categories by Job Count")
-
 bar_chart = (
     alt.Chart(top5_df)
     .mark_bar(color="#66b3ff")
@@ -94,9 +87,7 @@ bar_chart = (
     )
     .properties(width=700, height=400)
 )
-
 st.altair_chart(bar_chart, use_container_width=True)
-
 
 # ========================================
 # 🧭 CATEGORY SELECTION & JOB DETAILS
@@ -107,9 +98,6 @@ selected_category = st.sidebar.selectbox("Choose category", df_cat["category_lab
 if selected_category:
     jobs_df = load_jobs_by_category(selected_category)
     st.subheader(f"🗂️ Jobs in {selected_category}")
-
     st.dataframe(
-        jobs_df[
-            ["job_title", "company_name", "salary_min", "salary_max", "created", "redirect_url"]
-        ]
+        jobs_df[["job_title", "company_name", "salary_min", "salary_max", "created", "redirect_url"]]
     )
