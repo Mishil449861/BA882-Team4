@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-from gcp_utils import get_bq_client  # ✅ gcp_utils.py에서 가져옴
+from gcp_utils import get_bq_client  # 
 
-# ✅ BigQuery client 생성
+# ✅ BigQuery client 
 client = get_bq_client()
 
 st.set_page_config(page_title="Overview", page_icon="📊", layout="wide")
