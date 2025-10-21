@@ -50,7 +50,7 @@ def load_jobs_by_category(category):
     query = """
         SELECT 
             j.row.title AS job_title,
-            COALESCE(c.row.company_name, 'N/A') AS company_name,
+            COALESCE(comp.company_name, 'N/A') AS company_name,
             j.row.salary_min,
             j.row.salary_max,
             j.row.created,
@@ -58,8 +58,8 @@ def load_jobs_by_category(category):
         FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
         JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
             ON j.row.job_id = cat.job_id
-        LEFT JOIN `ba882-team4-474802.ba882_jobs.companies` AS c
-            ON j.row.job_id = c.row.job_id
+        LEFT JOIN `ba882-team4-474802.ba882_jobs.companies` AS comp
+            ON j.row.job_id = comp.job_id
         WHERE cat.category_label = @category
         ORDER BY j.row.created DESC
         LIMIT 100
