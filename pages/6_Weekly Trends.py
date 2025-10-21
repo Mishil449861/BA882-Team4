@@ -15,12 +15,12 @@ client = get_bq_client()
 def fetch_daily_posting_trends():
     query = """
         SELECT
-          DATE(posted_date) AS post_date,
+          DATE(created) AS created,
           COUNT(*) AS job_count
         FROM `ba882-team4-474802.ba882_jobs.jobs`
         WHERE posted_date IS NOT NULL
-        GROUP BY post_date
-        ORDER BY post_date
+        GROUP BY created
+        ORDER BY created
     """
     df = client.query(query).to_dataframe()
     return df
@@ -28,12 +28,12 @@ def fetch_daily_posting_trends():
 # Load data from BigQuery
 df = fetch_daily_posting_trends()
 
-# Display line chart
+# Display line chartcreated
 if df.empty:
     st.warning("No posting data available.")
 else:
     st.line_chart(
-        df.set_index("post_date"),
+        df.set_index("created"),
         y="job_count",
         use_container_width=True
     )
