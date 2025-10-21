@@ -30,16 +30,15 @@ st.title("📂 Job Categories Dashboard")
 def load_category_data():
     query = """
         SELECT
-            cat.row.category_label AS category_label,
+            cat.category_label AS category_label,
             COUNT(DISTINCT j.row.job_id) AS job_count
         FROM `ba882-team4-474802.ba882_jobs.jobs` AS j
         JOIN `ba882-team4-474802.ba882_jobs.categories` AS cat
-            ON j.row.job_id = cat.row.job_id
-        GROUP BY cat.row.category_label
+            ON j.row.job_id = cat.job_id
+        GROUP BY cat.category_label
         ORDER BY job_count DESC
     """
     return client.query(query).to_dataframe()
-
 # ========================================
 # 📋 JOBS UNDER SELECTED CATEGORY
 # ========================================
