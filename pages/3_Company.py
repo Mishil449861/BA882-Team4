@@ -22,6 +22,7 @@ def get_company_list():
         ORDER BY row.company
     """
     return client.query(query).to_dataframe()
+client = bigquery.Client(credentials=credentials, project=project_id)
 
 @st.cache_data
 def get_company_jobs(selected_company):
