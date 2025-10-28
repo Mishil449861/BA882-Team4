@@ -32,7 +32,7 @@ def fetch_data(pages=MAX_PAGES, per_page=RESULTS_PER_PAGE):
             f"?app_id={ADZUNA_APP_ID}"
             f"&app_key={ADZUNA_APP_KEY}"
             f"&results_per_page={per_page}"
-            f"&what=data OR analytics OR research OR data science OR data analyst OR business intelligence"
+            f"&what=data"
         )
         logger.info(f"Fetching page {page}")
         response = requests.get(url)
